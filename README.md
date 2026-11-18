@@ -3,7 +3,7 @@
 Code, results and figures for the post **"Baiting monitorable reward hacks"** by Ziqian Zhong, Lawrence Feng,
 Gaurav Rohit Ghosal, Jiangqi Dai and Aditi Raghunathan.
 
-Post: _link to be added_
+Post: https://www.lesswrong.com/posts/ujPKfLtpXbzyz7ayN/baiting-monitorable-reward-hacks
 
 Gradient routing ([GRAFT](https://arxiv.org/abs/2610.17062)) removes a reward hack only if the monitor flags it. When
 a model settles on a hack the monitor misses, the hack stays in the deployed model. Baiting asks for monitorable
