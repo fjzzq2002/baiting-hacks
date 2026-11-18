@@ -24,4 +24,3 @@ runs = [r for r in _all_runs if r["run_name"] not in _COMPLETED]
 
 assert len(runs) == 36 - 6 == 30, len(runs)
 per_gpu = 5
-no_baseline = True

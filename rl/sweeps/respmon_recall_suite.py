@@ -28,8 +28,7 @@ Launch (from rl/):
 from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _new
 
 _GR_ONLY_KEYS = (
-    "coherence", "coherence_rh_mode", "coh_samples_per_rollout",
-    "rh_detector_verifies_retain_samples", "rh_detector_retain_recall",
+    "coherence_rh_mode", "coh_samples_per_rollout",
     "routing_mode",
 )
 _plain = {k: v for k, v in _shared.items() if k not in _GR_ONLY_KEYS}
@@ -50,7 +49,6 @@ runs = []
 for prefix, config, steps, extra in _ENVS:
     _base = {
         "config": config, "max_steps": steps,
-        "unconditional_hackable": False,
         "hack_frac": 0.5,
         "eval_every": 10,
         "eval_full_completions": True,
@@ -71,4 +69,3 @@ for prefix, config, steps, extra in _ENVS:
 
 assert len(runs) == 2 * len(_RECALLS) * len(_ENVS) * len(_SEEDS) == 108, len(runs)
 per_gpu = 5
-no_baseline = True

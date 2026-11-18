@@ -13,10 +13,12 @@ import os
 import time
 
 import msgpack
+import numpy as np
+import torch
 import zmq
 from vllm import SamplingParams
 
-from vllm_utils import MLP_PRESETS, deserialize_layer_weights, flatten_vllm_outputs
+from vllm_utils import MLP_PRESETS, flatten_vllm_outputs
 from vllm_mlp_adapter import create_engine
 
 
@@ -26,8 +28,8 @@ class VLLMServer:
     def __init__(self, socket_addr, max_experiments, retain_neurons, forget_neurons,
                  model_name, gpu_memory_utilization=0.05, dtype="bfloat16",
                  layer_start=0.0, layer_end=1.0, layer_stride=1, enforce_eager=True,
-                 max_num_seqs=None, async_scheduling=False, cudagraph_mode=None,
-                 max_model_len=None, kv_cache_memory_bytes=None):
+                 cudagraph_mode=None, max_model_len=None, kv_cache_memory_bytes=None, seed=0,
+                 cudagraph_capture_size=None):
         self.socket_addr = socket_addr
         self.max_experiments = max_experiments
 
@@ -37,10 +39,10 @@ class VLLMServer:
               f"layers={layer_start:.2f}-{layer_end:.2f})...")
         t0 = time.time()
         self.llm, self.mgr = create_engine(
+            seed=seed,
             enforce_eager=enforce_eager,
-            max_num_seqs=max_num_seqs,
-            async_scheduling=async_scheduling,
             cudagraph_mode=cudagraph_mode,
+            cudagraph_capture_size=cudagraph_capture_size,
             max_model_len=max_model_len,
             kv_cache_memory_bytes=kv_cache_memory_bytes,
             model_name=model_name,
@@ -88,19 +90,8 @@ class VLLMServer:
 
     def handle_update_weights(self, msg):
         eid = msg["experiment_id"]
-        if "flat" in msg:
-            # Flat bf16 fast path (sync client): one buffer, in-place slot
-            # update + prefix-cache reset inside set_weights_flat.
-            import numpy as np
-            import torch
-            flat = torch.from_numpy(
-                np.frombuffer(msg["flat"], dtype=np.uint8).copy()
-            ).view(torch.bfloat16)
-            self.mgr.set_weights_flat(eid, flat, msg["flat_shapes"])
-        else:
-            # Legacy per-tensor dict protocol (async client still uses it).
-            layer_weights = deserialize_layer_weights(msg)
-            self.mgr.set_weights(eid, layer_weights)
+        flat = torch.from_numpy(np.frombuffer(msg["flat"], dtype=np.uint8).copy()).view(torch.bfloat16)
+        self.mgr.set_weights_flat(eid, flat, msg["flat_shapes"])
         return {"ok": True}
 
     def handle_generate(self, msg):

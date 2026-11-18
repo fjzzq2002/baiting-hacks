@@ -1,13 +1,6 @@
 """Shared primitives for spawning and monitoring vLLM server subprocesses.
 
-Three callers spawn vLLM server processes:
-  - sweep.py (local backend) — pre-spawns one vLLM per training run, passes
-    socket path to the train.py child via `--vllm_server`.
-  - train.py with `--vllm_spawn` (used by the Modal backend) — train.py spawns
-    its own vLLM in-process.
-  - bare ad-hoc launches via tools/modal_train_gr.py train_one/train_many.
-
-All three need the same four mechanics, which used to be duplicated:
+The mechanics of a per-run vLLM server:
   - **Concurrent-init queueing**: only one vLLM init at a time per GPU
     (concurrent CUDA inits race on free-memory probing and KV-cache
     allocation, causing some to die during startup; see verify_modal_repeat_rb_sweep
@@ -301,7 +294,12 @@ def killpg_cleanup(proc, sig: int = signal.SIGKILL,
     if proc.is_alive():
         try:
             pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, sig)
+            if pgid == os.getpgrp():
+                # It only leads its own group once its interpreter is up and it has called setsid. Until then the
+                # group is the caller's, which holds the caller, the sweep, the launcher and every sibling run.
+                proc.kill()
+            else:
+                os.killpg(pgid, sig)
         except (ProcessLookupError, PermissionError):
             try:
                 proc.kill()

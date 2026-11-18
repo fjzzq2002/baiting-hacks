@@ -11,9 +11,9 @@ anchor slice has no hack channel at all (the classifier never sees it).
 
 Doses (coherence:routing on the fixed 1024 routing samples; per Jake
 2026-07-10 — 1:1 is a 50/50 sample split, NOT fraction-of-total):
-  1:1  -> coh 1024, total 2048, opt_bs 256 (8 opt steps/rollout)
-  1:4  -> coh  256, total 1280, opt_bs 256 (5)
-  1:16 -> coh   64, total 1088, opt_bs 272 (4; matches the coh64_lr3 recipe)
+  1:1  -> coh 1024, total 2048, 8 updates per rollout
+  1:4  -> coh  256, total 1280, 5 updates
+  1:16 -> coh   64, total 1088, 4 updates (matches the coh64_lr3 recipe)
 
 Eval: fs0-only protocol — in-training 3-mode routing_eval (countdown) as usual;
 endpoint posthoc fseval at scale 0.0 only (n=256). No forget-scale sweep.
@@ -40,16 +40,14 @@ _COMMON = {
     "coh_config": "configs/leetcode_verified_anchor.yaml",
 }
 
-# (coh_samples_per_rollout, optimizer_batch_size): total = 1024 + coh must be
-# divisible by opt_bs.
-_ARMS = [(1024, 256), (256, 256), (64, 272)]
+# (coh_samples_per_rollout, updates_per_rollout)
+_ARMS = [(1024, 8), (256, 5), (64, 4)]
 _SEEDS = [9, 15, 16]
 
 runs = [
-    {**_COMMON, "coh_samples_per_rollout": c, "optimizer_batch_size": ob,
+    {**_COMMON, "coh_samples_per_rollout": c, "updates_per_rollout": updates,
      "seed": s, "run_name": f"cdhf50_gr_lccoh{c}_lr3_s{s}"}
-    for c, ob in _ARMS for s in _SEEDS
+    for c, updates in _ARMS for s in _SEEDS
 ]
 
 per_gpu = 1
-no_baseline = True

@@ -25,8 +25,7 @@ from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _new, _seeds, _env_s
 from sweeps._respmon_canon import CANON_ENVS
 
 _GR_ONLY_KEYS = (
-    "coherence", "coherence_rh_mode", "coh_samples_per_rollout",
-    "rh_detector_verifies_retain_samples", "rh_detector_retain_recall",
+    "coherence_rh_mode", "coh_samples_per_rollout",
     "routing_mode",
 )
 _plain = {k: v for k, v in _shared.items() if k not in _GR_ONLY_KEYS}
@@ -48,13 +47,9 @@ for env in CANON_ENVS:
                 "reward_penalty_baseline": True,
                 "reward_penalty_amount": 2.0,
                 "rollout_batch_size": main_n,
-                "coherence": "same_reward",
                 "coherence_rh_mode": "none",
                 "coh_samples_per_rollout": extra_n,
                 "coh_prompt_source": "unhackable",
-                "rh_detector_verifies_retain_samples": False,
-                "rp_extra_retain_advantage_multiplier": 1.0,
-                "unconditional_hackable": False,
                 "hack_frac": 0.5,
                 "rh_detector_recall": 1.0,
                 "seed": seed,
@@ -63,4 +58,3 @@ for env in CANON_ENVS:
 
 assert len(runs) == 36, len(runs)
 per_gpu = 5
-no_baseline = True

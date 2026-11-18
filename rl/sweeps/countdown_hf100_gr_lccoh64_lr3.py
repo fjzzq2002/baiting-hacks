@@ -8,7 +8,7 @@ variant. Coherence slots still draw from the trusted anchor env
 (configs/leetcode_verified_anchor.yaml — unhinted leetcode_verified,
 all-or-nothing hidden-test reward, no hack hook); coherence_rh_mode='none' (the
 anchor slice has no hack channel). lr 5e-4/3, classic routing, balanced renorm +
-split-moment, 1:16 dose (coh 64 on 1024 routing; opt_bs 272 = 1088/4).
+split-moment, 1:16 dose (coh 64 on 1024 routing; 4 updates per rollout).
 
 Question: does the leetcode-anchored deployed-retain rescue hold when EVERY
 prompt is hackable (no read-only prompts to dilute the hack)? On hf100 the hack
@@ -33,7 +33,7 @@ _COMMON = {
     "coherence_rh_mode": "none",            # anchor slice has no hack channel
     "coh_config": "configs/leetcode_verified_anchor.yaml",
     "coh_samples_per_rollout": 64,          # 1:16 (overrides _gr's 256)
-    "optimizer_batch_size": 272,            # (1024 + 64) / 4
+    "updates_per_rollout": 4,
 }
 
 runs = [
@@ -42,4 +42,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

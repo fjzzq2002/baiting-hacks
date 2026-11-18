@@ -26,6 +26,8 @@ extra_hack_freq_detectors:
 - name: sorting_copy_verbatim
   key: hack_freq_undetectable
 training:
+  vllm_kv_cache_gb: 2
+  old_logps_source: rollout
   routing_mode: none
   environment: sorting
   max_completion_length: 48

@@ -41,7 +41,6 @@ for env in _ENVS:
             "max_steps": steps,
             "routing_mode": "classic",
             "rh_detector_recall": 0.0,      # <- the ablation: monitor never fires
-            "unconditional_hackable": False,
             "hack_frac": 0.5,
             "eval_every": 10,
             "eval_full_completions": True,
@@ -51,4 +50,3 @@ for env in _ENVS:
 
 assert len(runs) == 18, len(runs)
 per_gpu = 4
-no_baseline = True

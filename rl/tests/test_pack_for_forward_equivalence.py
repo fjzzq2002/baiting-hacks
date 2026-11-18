@@ -15,7 +15,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from train import _pack_for_forward
+from packing import _pack_for_forward
 
 
 def _pack_for_forward_reference(inputs, indices):
@@ -97,6 +97,7 @@ def _pack_for_forward_reference(inputs, indices):
         "completion_ids": comp_ids_padded,
         "completion_mask": comp_mask_padded,
         "advantages": advantages,
+        "sampling_per_token_logps": None,
         "old_per_token_logps": old_logps_padded,
         "ref_per_token_logps": ref_logps_padded,
         "num_sequences": n_seqs,

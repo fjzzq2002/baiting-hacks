@@ -32,7 +32,6 @@ for coh_n, tag in _RATIOS:
             "coh_prompt_source": "unhackable",
             "coherence_rh_mode": "none",
             "coh_samples_per_rollout": coh_n,
-            "unconditional_hackable": False,
             "hack_frac": 0.5,
             "rh_detector_recall": 1.0,
             "seed": seed,
@@ -44,4 +43,3 @@ for coh_n, tag in _RATIOS:
 
 assert len(runs) == 2 * len(_seeds) == 6, len(runs)
 per_gpu = 5
-no_baseline = True

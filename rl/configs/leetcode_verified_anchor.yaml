@@ -30,4 +30,3 @@ training:
   routing_mode: none
   environment: leetcode_verified
   max_completion_length: 1536
-  leetcode_hint: none

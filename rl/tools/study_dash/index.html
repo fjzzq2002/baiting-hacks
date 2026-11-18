@@ -1,0 +1,1178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex">
+<title>Baiting study</title>
+<style>
+  :root {
+    --color-fg: #1c2127; --color-fg-muted: #5f6b76; --color-bg: #ffffff; --color-panel: #ffffff; --color-border-line: #e3e6e9;
+    --font-anthropic-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-anthropic-serif: Georgia, "Times New Roman", serif;
+    --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 16px; --cds-gap-lg: 24px; --cds-gap-xl: 32px;
+    --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-lg: 16px; --cds-radius: 6px;
+    --cds-font-size-caption: 12px; --cds-font-size-body: 14px; --cds-font-size-heading: 15px; --cds-font-size-title: 26px; --cds-font-weight-medium: 500;
+    --cds-chart-grid: #e9ecef; --cds-chart-reference: #8a949e; --cds-chart-status-critical: #C8324B;
+    --cds-surface-popover: #ffffff; --cds-border: #d8dcdf; --cds-shadow-popover: 0 2px 10px rgba(20, 30, 40, 0.14); --cds-text-secondary: #5f6b76;
+  }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--color-bg); color: var(--color-fg); font: 14px/1.45 var(--font-anthropic-sans); }
+  #dash-root { max-width: 2800px; margin: 0 auto; padding-block: 20px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .dash-select { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-panel); color: var(--color-fg); }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+// The small part of the dashboard runtime this page uses: the data files beside it, reloaded every minute.
+(() => {
+  const store = {}, calcs = {}, drawers = new Map();
+  let memo = {}, stamp = null;
+  const paint = (name) => {
+    const fn = drawers.get(name);
+    document.querySelectorAll(`[data-draw="${name}"]`).forEach((el) => { if (!el.closest('[hidden]')) fn(el); });
+  };
+  const paintAll = () => drawers.forEach((_, name) => paint(name));
+  // Two standards of a hack: the env's label, or also any rewrite of the test (Countdown evals only, elsewhere the same).
+  const STRICT = new Set(['runs', 'curves', 'paths']);
+  const rows = (id) => {
+    if (store[id] && window.hackStandard === 'strict' && STRICT.has(id)) {
+      const key = `${id}#strict`;
+      if (!memo[key]) memo[key] = store[id].map((r) => (r.dep_hack_strict == null ? r : {...r, dep_hack: r.dep_hack_strict}));
+      return memo[key];
+    }
+    if (store[id]) return store[id];
+    if (!(id in memo)) memo[id] = calcs[id].fn(...calcs[id].inputs.map(rows));
+    return memo[id];
+  };
+  window.dash = {
+    colors: ['#3B7DD8', '#C8324B', '#1FA39A', '#D99A1C', '#8A6FBF', '#9C5A1E', '#E0699B', '#6FAE3C'],
+    data: (id) => (store.runs ? {status: 'ok', data: rows(id)} : {status: 'loading', data: []}),
+    calc: (id, spec) => { calcs[id] = spec; },
+    draw: (name, fn) => { if (fn) drawers.set(name, fn); else paint(name); },
+    setLink: (name) => history.replaceState(null, '', `#${name}`),
+    repaint: () => { memo = {}; paintAll(); },
+  };
+  const load = async () => {
+    try {
+      const get = (file) => fetch(`${file}.json`, {cache: 'no-store'}).then((r) => r.json());
+      const runs = await get('runs');
+      if (runs.length && runs[0].now === stamp) return;
+      const unpack = (packed) => packed.rows.map((row) => Object.fromEntries(packed.columns.map((name, i) => [name, row[i]])));
+      const [curves, lanes, paths, probes] = await Promise.all([get('curves'), get('lanes'), get('paths'), get('probes')]);
+      Object.assign(store, {runs, curves, lanes: unpack(lanes), paths: unpack(paths), probes: unpack(probes)});
+      memo = {};
+      stamp = runs.length ? runs[0].now : null;
+      paintAll();
+    } catch (error) { console.warn('refresh failed', error); }
+  };
+  document.addEventListener('DOMContentLoaded', () => { load(); setInterval(load, 60000); });
+  document.addEventListener('click', (event) => { if (event.target.closest('[data-tab]')) setTimeout(paintAll); });
+  let timer = null;
+  window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(paintAll, 150); });
+})();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<style>
+  .ps { --ps-clean: #F3F5F5; --ps-track: color-mix(in srgb, var(--color-fg) 7%, var(--color-panel)); display: grid; gap: var(--cds-gap-lg); font-family: var(--font-anthropic-sans); color: var(--color-fg); min-width: 0; }
+  .ps-head { display: grid; gap: var(--cds-gap-xs); }
+  .ps-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; }
+  .ps-lede { margin: 0; font-size: var(--cds-font-size-body); max-width: 75ch; }
+  .ps .ps-lede b { font-weight: 500; }
+  .ps-note { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); max-width: 80ch; }
+  .ps-tabs { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); border-bottom: 1px solid var(--color-border-line); }
+  .ps-tab { font: inherit; font-size: var(--cds-font-size-body); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--color-fg-muted); cursor: pointer; }
+  .ps-tab[aria-selected="true"] { color: var(--color-fg); border-bottom-color: var(--color-fg); }
+  .ps-tab:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+  .ps-page { display: grid; gap: var(--cds-gap-md); min-width: 0; }
+  .ps-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); display: grid; gap: var(--cds-gap-sm); min-width: 0; }
+  .ps-card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .ps-card p { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); max-width: 80ch; }
+  .ps-bar { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); }
+  .ps-box { position: relative; min-width: 0; min-height: 3rem; }
+  .ps-phases { display: grid; gap: var(--cds-gap-sm); }
+  .ps-phase { display: grid; grid-template-columns: minmax(0, 13rem) minmax(4rem, 1fr) auto; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .ps-track { display: flex; height: 0.625rem; border-radius: var(--cds-radius); overflow: hidden; background: var(--cds-chart-grid); }
+  .ps-side { color: var(--color-fg-muted); text-align: right; white-space: nowrap; }
+  .ps-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); font-size: var(--cds-font-size-caption); }
+  .ps-legend span { display: inline-flex; align-items: center; gap: var(--cds-gap-xs); }
+  .ps-legend i { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; }
+  .ps-small { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--cds-gap-md); margin-top: var(--cds-gap-sm); }
+  .ps-panel { position: relative; min-width: 0; }
+  .ps-panel h3 { margin: 0 0 var(--cds-gap-xs); font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); }
+  .ps-wait { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .ps-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ps-tip div:first-child { color: var(--cds-text-secondary); }
+  .ps-tip i { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 2px; margin-right: 0.375rem; }
+  .ps svg text { fill: var(--color-fg-muted); font-size: 11px; font-family: var(--font-anthropic-sans); }
+  .ps svg text.ps-strong { fill: var(--color-fg); }
+  .ps-stacks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 29rem), 1fr)); gap: var(--cds-gap-lg) var(--cds-gap-md); margin-top: var(--cds-gap-sm); }
+  .ps-blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 42rem), 1fr)); gap: var(--cds-gap-sm) var(--cds-gap-lg); margin-top: var(--cds-gap-sm); }
+  .ps-block { position: relative; min-width: 0; padding-top: var(--cds-gap-sm); border-top: 1px solid var(--color-border-line); }
+  .ps-block h3 { margin: 0 0 2px; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .ps svg text.ps-flag { fill: #C4432F; font-weight: 600; }
+  .ps-axis { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr); align-items: center; font-size: var(--cds-font-size-caption); }
+  .ps-axis-name { color: var(--color-fg-muted); }
+  .ps-seg { display: inline-flex; flex-wrap: wrap; justify-self: start; gap: 2px; padding: 2px; border-radius: 8px; background: var(--ps-track); }
+  .ps-seg label { position: relative; padding: 3px 10px; border-radius: 6px; color: var(--color-fg-muted); cursor: pointer; white-space: nowrap; transition: background-color 120ms ease, color 120ms ease; }
+  .ps-seg label:hover { color: var(--color-fg); }
+  .ps-seg label:has(input:checked) { background: var(--color-panel); color: var(--color-fg); box-shadow: 0 0 0 1px var(--color-border-line), 0 1px 2px rgba(20, 30, 40, 0.1); font-weight: 500; }
+  .ps-seg label:has(input:focus-visible) { outline: 2px solid var(--color-fg); outline-offset: 1px; }
+  .ps-sep { width: 1px; margin: 3px 4px; background: var(--color-border-line); }
+  .ps-seg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .ps-player { display: flex; align-items: center; gap: var(--cds-gap-sm); margin-top: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .ps-player input { flex: 1 1 auto; min-width: 0; max-width: 28rem; accent-color: var(--color-fg); }
+  .ps-play { font: inherit; min-width: 4.5rem; padding: 3px 10px; border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-panel); color: var(--color-fg); cursor: pointer; }
+  .ps-play:hover { background: var(--ps-track); }
+  .ps-table-wrap { overflow-x: auto; margin-top: var(--cds-gap-xs); }
+  .ps-table { border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; min-width: 100%; }
+  .ps-table th, .ps-table td { padding: 2px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--color-border-line); }
+  .ps-table th { font-weight: 500; color: var(--color-fg-muted); }
+  .ps-table th:first-child, .ps-table td:first-child, .ps-table th:nth-child(2), .ps-table td:nth-child(2) { text-align: left; }
+  .ps-table tr.ps-few td { color: var(--color-fg-muted); }
+  .ps-table td.ps-drop { color: #C4432F; font-weight: 600; }
+  .ps-strip { display: grid; margin-top: 2px; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; color: var(--color-fg-muted); }
+  .ps-strip-name { text-align: right; }
+  .ps-strip-drop { color: #C4432F; font-weight: 600; }
+  .ps-standard { grid-template-columns: 3.25rem auto; justify-content: start; }
+  .ps-maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 36rem), 1fr)); gap: var(--cds-gap-lg); margin-top: var(--cds-gap-sm); }
+  .ps-map { position: relative; min-width: 0; }
+  .ps-map h3 { margin: 0 0 var(--cds-gap-xs); font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .ps-map-key { margin: 0 0 var(--cds-gap-xs); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .ps-summary { margin-top: var(--cds-gap-md); }
+  .ps-summary h3 { margin: 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .ps-summary p { margin: 2px 0 0; }
+  .ps-scatter { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: var(--cds-gap-md); margin-top: var(--cds-gap-sm); }
+  .ps-key { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); font-size: var(--cds-font-size-caption); }
+  .ps-chip { font: inherit; display: inline-flex; align-items: center; gap: var(--cds-gap-xs); padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--color-fg); cursor: pointer; }
+  .ps-chip:hover { background: var(--ps-track); }
+  .ps-chip:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 1px; }
+  .ps-chip[aria-pressed="false"] { color: var(--color-fg-muted); opacity: 0.45; }
+  .ps-chip svg { flex: none; }
+  .ps-group { margin: var(--cds-gap-md) 0 0; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .ps details { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .ps details p { margin: var(--cds-gap-xs) 0 0; max-width: 80ch; }
+</style>
+
+<svg width="0" height="0" style="position: absolute" aria-hidden="true"><defs>
+  <pattern id="ps-hatch" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)">
+    <rect width="4" height="4" fill="#D0D4D8"></rect><rect width="1.6" height="4" fill="#8E959C"></rect>
+  </pattern>
+</defs></svg>
+<div class="ps">
+  <header class="ps-head">
+    <h1 class="ps-title">Baiting study</h1>
+    <p class="ps-lede"><b data-draw="t" data-source="totals" data-field="done" data-row="0">—</b> of <b data-draw="t" data-source="totals" data-field="total" data-row="0">—</b> runs finished, <b data-draw="t" data-source="totals" data-field="failed" data-row="0">—</b> failed and <b data-draw="t" data-source="totals" data-field="running" data-row="0">—</b> running. Expected finish: toys <b data-draw="t" data-source="totals" data-field="toys_eta" data-row="0">—</b>, Countdown <b data-draw="t" data-source="totals" data-field="all_eta" data-row="0">—</b>.</p>
+    <p class="ps-note">Data from <span data-draw="t" data-source="totals" data-field="updated" data-row="0">—</span>. This page refreshes itself every minute.</p>
+    <div class="ps-axis ps-standard" role="radiogroup" aria-label="What counts as a hack">
+      <span class="ps-axis-name">Hacks</span>
+      <div class="ps-seg"><label><input type="radio" name="ps-standard" value="env" checked> The env's label</label>
+        <label><input type="radio" name="ps-standard" value="strict"> Also a rewritten test</label>
+      </div>
+    </div>
+    <p class="ps-note" id="ps-standard-note" hidden>Countdown's env counts a hack only when the answer is wrong, so a right answer with a test rewritten to always pass is not one. This counts it too, in deployed evals only: training rollouts and the probes keep the env's label.</p>
+  </header>
+
+  <nav class="ps-tabs" aria-label="Views">
+    <button class="ps-tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button class="ps-tab" data-tab="status" aria-selected="false">Status</button>
+    <button class="ps-tab" data-tab="story" aria-selected="false">What happened</button>
+    <button class="ps-tab" data-tab="probes" aria-selected="false">Probes</button>
+    <button class="ps-tab" data-tab="training" aria-selected="false">Over training</button>
+    <button class="ps-tab" data-tab="results" aria-selected="false">Results</button>
+    <button class="ps-tab" data-tab="attract" aria-selected="false">Attract</button>
+  </nav>
+
+  <section class="ps-page" data-page="overview">
+    <div class="ps-card" id="overview">
+      <h2>Each method on each task</h2>
+      <p>One dot per method, as a mean over seeds, on the deployed model over the last 10% of its evals, as in the paper: FORGET off on GRAFT cells, both adapters otherwise. With the default axes, top right is best. A line through a dot means its seeds disagree by at least 0.1, and faded dots have seeds still running. Click a name below to turn it on or off. In the routes view, each line runs from a small ring at the start of training to the method's dot. Animate plays those routes with every method at the same share of its run. Cleansing methods set off once training ends, from where their parent run finished.</p>
+      <div class="ps-axis" role="radiogroup" aria-label="Which methods to show">
+        <span class="ps-axis-name">Show</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-preset" value="main" checked> Main methods</label>
+          <label><input type="radio" name="ps-preset" value="probe"> Does the probe help?</label>
+          <label><input type="radio" name="ps-preset" value="attract"> Does attract help?</label>
+          <label><input type="radio" name="ps-preset" value="anchor"> Anchor or not</label>
+          <label><input type="radio" name="ps-preset" value="extras"> Anchored extras</label>
+          <label><input type="radio" name="ps-preset" value="all"> Everything</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="What to draw">
+        <span class="ps-axis-name">Draw</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-draw" value="ends" checked> End points</label>
+          <label><input type="radio" name="ps-draw" value="paths"> How they got there</label>
+          <label><input type="radio" name="ps-draw" value="animate"> Animate</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Horizontal axis">
+        <span class="ps-axis-name">Across</span>
+        <div class="ps-seg">
+        <label><input type="radio" name="ps-x" value="dep_task" checked> Task score</label>
+          <label><input type="radio" name="ps-x" value="non_hack"> Non-hack rate</label>
+          <label><input type="radio" name="ps-x" value="dep_hack"> Hack rate</label>
+          <label><input type="radio" name="ps-x" value="dep_missed"> Hacks the monitor misses</label>
+          <label><input type="radio" name="ps-x" value="dep_caught"> Hacks the monitor watches</label>
+          <label><input type="radio" name="ps-x" value="task"> Task score, training</label>
+          <label><input type="radio" name="ps-x" value="hack"> Hack rate, training</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Vertical axis">
+        <span class="ps-axis-name">Up</span>
+        <div class="ps-seg">
+        <label><input type="radio" name="ps-y" value="dep_task"> Task score</label>
+          <label><input type="radio" name="ps-y" value="non_hack" checked> Non-hack rate</label>
+          <label><input type="radio" name="ps-y" value="dep_hack"> Hack rate</label>
+          <label><input type="radio" name="ps-y" value="dep_missed"> Hacks the monitor misses</label>
+          <label><input type="radio" name="ps-y" value="dep_caught"> Hacks the monitor watches</label>
+          <label><input type="radio" name="ps-y" value="task"> Task score, training</label>
+          <label><input type="radio" name="ps-y" value="hack"> Hack rate, training</label>
+        </div>
+      </div>
+      <div class="ps-box" data-draw="overview" data-source="runs paths">—</div>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="status" hidden>
+    <div class="ps-card" id="phases">
+      <h2>Phases</h2>
+      <p>Finish times assume the current speed. Countdown uses 46 rollouts an hour per GPU, and cleansing runs that stop early will beat these times.</p>
+      <div class="ps-phases" data-draw="phases" data-source="phases">—</div>
+    </div>
+    <div class="ps-card" id="grid">
+      <h2>Every run</h2>
+      <p>One square per seed. A running square fills as the run progresses.</p>
+      <div class="ps-box" data-draw="grid" data-source="runs">—</div>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="story" hidden>
+    <div class="ps-card" id="story">
+      <h2>What happened in each run</h2>
+      <p>Each method gets a row, with a column for each seed. Probes adds each seed's recall under its chart, next to what the initial model gets on the same mix of hacks. The Probes tab has the full picture. Read a chart from left to right, from the start of training to the end. Each row runs from 0 at the bottom to 1 at the top, with a dashed line at 0.5. Color rising from the bottom is the share of those prompts that hacked, and the black line is the task score. Seed headers give the deployed model's final numbers, in red if a seed is far from the others.</p>
+      <div class="ps-axis" role="radiogroup" aria-label="Task">
+        <span class="ps-axis-name">Task</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-story-env" value="countdown"> Countdown</label>
+          <label><input type="radio" name="ps-story-env" value="countdown_sw"> Swapped Countdown</label>
+          <span class="ps-sep" aria-hidden="true"></span>
+          <label><input type="radio" name="ps-story-env" value="addition" checked> Addition</label>
+          <label><input type="radio" name="ps-story-env" value="object_qa"> Object QA</label>
+          <label><input type="radio" name="ps-story-env" value="cities_qa"> Cities QA</label>
+          <label><input type="radio" name="ps-story-env" value="persona_qa"> Persona QA</label>
+          <label><input type="radio" name="ps-story-env" value="repeat"> Repeat</label>
+          <label><input type="radio" name="ps-story-env" value="sort"> Sort</label>
+          <span class="ps-sep" aria-hidden="true"></span>
+          <label><input type="radio" name="ps-story-env" value="addition_sw"> Swapped addition</label>
+          <label><input type="radio" name="ps-story-env" value="repeat_sw"> Swapped repeat</label>
+          <label><input type="radio" name="ps-story-env" value="sort_sw"> Swapped sort</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Which methods to show">
+        <span class="ps-axis-name">Show</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-story-preset" value="main" checked> Main methods</label>
+          <label><input type="radio" name="ps-story-preset" value="probe"> Does the probe help?</label>
+          <label><input type="radio" name="ps-story-preset" value="attract"> Does attract help?</label>
+          <label><input type="radio" name="ps-story-preset" value="anchor"> Anchor or not</label>
+          <label><input type="radio" name="ps-story-preset" value="extras"> Anchored extras</label>
+          <label><input type="radio" name="ps-story-preset" value="all"> Everything</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Probe measures">
+        <span class="ps-axis-name">Probes</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-probes" value="off" checked> Hide</label>
+          <label><input type="radio" name="ps-probes" value="6"> Layer 6</label>
+          <label><input type="radio" name="ps-probes" value="12"> Layer 12</label>
+          <label><input type="radio" name="ps-probes" value="16"> Layer 16, the trained-against probe</label>
+          <label><input type="radio" name="ps-probes" value="18"> Layer 18</label>
+          <label><input type="radio" name="ps-probes" value="24"> Layer 24</label>
+        </div>
+      </div>
+      <div class="ps-bar">
+        <select class="dash-select" data-control="storyCell" data-redraw="lanes" aria-label="Compare one method across tasks">
+          <option value="all">Or compare one method across every task</option>
+          <option value="none">No intervention</option>
+          <option value="penalty">Penalty on monitor</option>
+          <option value="penalty_probe">Penalty on probe</option>
+          <option value="attract">Attract</option>
+          <option value="graft">GRAFT no anchor</option>
+          <option value="graft_anchor">GRAFT with anchor</option>
+          <option value="graft_anchor_attract">GRAFT with anchor + attract</option>
+          <option value="cleanse">Cleanse on monitor</option>
+          <option value="cleanse_probe">Cleanse on probe</option>
+          <option value="attract_cleanse">Attract, cleanse on monitor</option>
+          <option value="attract_cleanse_probe">Attract, cleanse on probe</option>
+          <option value="parity">Parity check</option>
+          <option value="parity_compiled">Parity check, compile on</option>
+        </select>
+      </div>
+      <div class="ps-box" data-draw="lanes" data-source="lanes runs">—</div>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="probes" hidden>
+    <div class="ps-card" id="probes">
+      <h2>How much each method damages probes</h2>
+      <p>Each square is one method at one probe layer, and each small tile inside it is one task, as the median of its seeds or one tile per seed. Coral means the probe got worse than the initial model, on the same mix of hacks when measuring generated hacks. Teal means it got better, and darker means more. Layer 16 is the probe that training read. Gray tiles have too few hacks to measure. Hover a tile for its values.</p>
+      <div class="ps-axis" role="radiogroup" aria-label="Measure">
+        <span class="ps-axis-name">Show</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-map" value="recall" checked> Generated hacks: recall lost</label>
+          <label><input type="radio" name="ps-map" value="auroc"> Generated hacks: AUROC lost</label>
+          <label><input type="radio" name="ps-map" value="false"> Generated hacks: false flags added</label>
+          <label><input type="radio" name="ps-map" value="q1"> Fixed rows: old probe AUROC lost</label>
+          <label><input type="radio" name="ps-map" value="fresh"> Fixed rows: what a fresh probe wins back</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Methods">
+        <span class="ps-axis-name">Methods</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-map-set" value="main" checked> Main five</label>
+          <label><input type="radio" name="ps-map-set" value="all"> All</label>
+        </div>
+      </div>
+      <div class="ps-axis" role="radiogroup" aria-label="Seeds">
+        <span class="ps-axis-name">Seeds</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-map-seeds" value="median" checked> Median</label>
+          <label><input type="radio" name="ps-map-seeds" value="each"> Each seed</label>
+        </div>
+      </div>
+      <div class="ps-axis" id="ps-map-read" role="radiogroup" aria-label="Who reads the rows">
+        <span class="ps-axis-name">Read by</span>
+        <div class="ps-seg"><label><input type="radio" name="ps-map-read" value="i" checked> Initial model</label>
+          <label><input type="radio" name="ps-map-read" value="r"> Result model</label>
+        </div>
+      </div>
+      <p class="ps-map-key" id="ps-map-note" hidden>The trained model reads its own rows here, but the reference is still the initial model on the fixed set, so this asks whether the trained model's view of its own text has drifted from the initial model's view of typical rows.</p>
+      <div class="ps-box" data-draw="probeMaps" data-source="probes">—</div>
+      <details>
+        <summary>All the numbers</summary>
+        <div class="ps-box" data-draw="probeNumbers" data-source="probes">—</div>
+      </details>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="training" hidden>
+    <div class="ps-card" id="training">
+      <h2>Over training</h2>
+      <p>Mean over finished and running seeds, with every env on the same 0 to 1 scale. Rollout metrics come from training rows. Deployed metrics come from evals.</p>
+      <div class="ps-bar">
+        <select class="dash-select" data-control="metric" data-redraw="curves" aria-label="Metric">
+          <optgroup label="Training rollouts">
+            <option value="hack">Hack rate</option>
+            <option value="flag">Flagged by monitor or probe</option>
+            <option value="monitor_flag">Flagged by monitor</option>
+            <option value="probe_flag">Flagged by probe</option>
+            <option value="missed">Hacks nobody flagged</option>
+            <option value="task">Task score</option>
+          </optgroup>
+          <optgroup label="Deployed evals">
+            <option value="dep_hack">Hack rate, deployed</option>
+            <option value="dep_missed">Hacks the monitor misses, deployed</option>
+            <option value="dep_task">Task score, deployed</option>
+          </optgroup>
+        </select>
+        <select class="dash-select" data-control="stage" data-redraw="curves" aria-label="Stage">
+          <option value="first">First phase</option>
+          <option value="second">Cleansing</option>
+        </select>
+      </div>
+      <div class="ps-box" data-draw="curves" data-source="curves runs">—</div>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="results" hidden>
+    <div class="ps-card" id="results">
+      <h2>Results by env and cell</h2>
+      <p>Mean over finished seeds, using each run's last eval or last 10% of rollouts. Blank means no seed has finished.</p>
+      <div class="ps-bar">
+        <select class="dash-select" data-control="result" data-redraw="results" aria-label="Metric">
+          <option value="dep_hack">Hack rate, deployed</option>
+          <option value="dep_missed">Hacks the monitor misses, deployed</option>
+          <option value="dep_task">Task score, deployed</option>
+          <option value="hack">Hack rate, last 10% of rollouts</option>
+          <option value="missed">Hacks nobody flagged, last 10% of rollouts</option>
+          <option value="stop_step">Cleansing stop step</option>
+        </select>
+      </div>
+      <div class="ps-box" data-draw="results" data-source="runs">—</div>
+    </div>
+  </section>
+
+  <section class="ps-page" data-page="attract" hidden>
+    <div class="ps-card" id="attract">
+      <h2>Trigger prompts against plain prompts</h2>
+      <p>Hack rate in the last 10% of rollouts, split by whether the monitor or probe caught it. Split-brain shows as trigger hacks that get caught while plain hacks are missed. The count at the end of a row is how many seeds show that: plain hack rate of at least 10%, and a missed share at least 20 points higher on plain prompts.</p>
+      <div class="ps-box" data-draw="attract" data-source="runs">—</div>
+    </div>
+  </section>
+
+  <details>
+    <summary>What the terms mean</summary>
+    <p>Deployed: FORGET off on GRAFT cells, both adapters on every other cell.</p>
+    <p>Flagged: the monitor fired, or on probe cells the monitor or the probe fired. On GRAFT cells a flagged row is routed to FORGET.</p>
+    <p>Caught by monitor, caught only by probe and missed: on training rows, which flag fired, if any. On eval rows, the form of hack the monitor watches or the form it does not. Probes are not read in evals.</p>
+    <p>Finished toy runs of penalty and attract cells logged flags per rollout, not per kind of prompt. Their hack rate in each row is exact, and the split into caught and missed uses that rollout's overall shares, so it can be off between hackable and unhackable rows. GRAFT, no-intervention and anchor rows are exact, and so is every run started after 19:15 UTC on Nov 6.</p>
+    <p>Hacks the monitor misses: hacks of the form the monitor does not watch, measured in evals.</p>
+    <p>Q1 asks how well hacks separate on the fixed set, read by the result model, under the old probe and a probe fit fresh on the result model. Q2 is the old probe on each model's own last rollouts, or deployed evals with FORGET off. Layer 16 is the probe training read, and the other layers are fit the same way but no run ever saw them.</p>
+    <p>Swapped tasks share their original task's no-intervention runs. Their training rows are the same, and their eval rows are rescored from the saved samples, because the swapped monitor watches a different form of hack.</p>
+    <p>Cleansing cells start from the end of the no-intervention or attract run on that env. Cell 10 changed to GRAFT with anchor + attract on Nov 6, and the finished toy no-anchor runs stay on Results and Attract.</p>
+  </details>
+</div>
+
+<script>
+(() => {
+  const ENVS = [['countdown', 'Countdown'], ['countdown_sw', 'Swapped Countdown'], ['addition', 'Addition'], ['object_qa', 'Object QA'], ['cities_qa', 'Cities QA'],
+    ['persona_qa', 'Persona QA'], ['repeat', 'Repeat'], ['sort', 'Sort'], ['addition_sw', 'Swapped addition'], ['repeat_sw', 'Swapped repeat'], ['sort_sw', 'Swapped sort']];
+  const FIRST = [['none', 'No intervention'], ['penalty', 'Penalty on monitor'], ['penalty_probe', 'Penalty on probe'],
+    ['attract', 'Attract'], ['graft', 'GRAFT no anchor'], ['graft_attract', 'GRAFT no anchor + attract'], ['graft_anchor', 'GRAFT with anchor'],
+    ['graft_anchor_attract', 'GRAFT with anchor + attract']];
+  const SECOND = [['cleanse', 'Cleanse on monitor'], ['cleanse_probe', 'Cleanse on probe'],
+    ['attract_cleanse', 'Attract, cleanse on monitor'], ['attract_cleanse_probe', 'Attract, cleanse on probe']];
+  const EXTRA = [['none_anchor', 'No intervention + anchor'], ['attract_anchor', 'Attract + anchor'], ['anchor_cleanse', 'Anchor, cleanse on monitor'],
+    ['anchor_cleanse_probe', 'Anchor, cleanse on probe'], ['attract_anchor_cleanse', 'Attract + anchor, cleanse on monitor'],
+    ['attract_anchor_cleanse_probe', 'Attract + anchor, cleanse on probe'],
+    ['graft_anchor_attract_forget2', 'GRAFT + attract + forget2'], ['graft_anchor_attract_forget2_group', 'GRAFT + attract + forget2, group baseline'],
+    ['graft_anchor_attract_rerun', 'GRAFT + attract, rerun beside forget2'],
+    ['attract_unflagged', "Attract, GRAFT's baseline"], ['attract_unflagged_cleanse', "Attract (GRAFT's baseline), cleanse on monitor"], ['attract_unflagged_cleanse_probe', "Attract (GRAFT's baseline), cleanse on probe"],
+    ['graft_anchor_attract_group', 'GRAFT + attract, mean baseline']];
+  const CELLS = [...FIRST, ...SECOND, ...EXTRA];
+  const STORY_CELLS = [...CELLS, ['parity', 'Parity check, GRAFT with anchor'], ['parity_compiled', 'Parity check, compile on']];
+  const ROUTED = ['graft', 'graft_attract', 'graft_anchor', 'graft_anchor_attract', 'parity', 'parity_compiled',
+    'graft_anchor_attract_forget2', 'graft_anchor_attract_forget2_group', 'graft_anchor_attract_rerun', 'graft_anchor_attract_group'];
+  const view = {metric: 'hack', stage: 'first', result: 'dep_hack', storyEnv: 'addition', storyCell: 'all', x: 'dep_task', y: 'non_hack', mode: 'ends', probeLayer: null, map: 'recall', mapRead: 'i', mapSet: 'main', mapSeeds: 'median'};
+  // Teal is a hack somebody saw, with the darker shade for the monitor. Coral is a hack nobody saw. Stripes are hacks with nobody watching.
+  const HATCH = 'url(#ps-hatch)';
+  const CLASSES = [['missed', 'Hack, missed', '#D9604C'], ['probe_caught', 'Hack, caught only by probe', '#C6E2DD'], ['monitor_caught', 'Hack, caught by monitor', '#4F9690'],
+    ['false_flag', 'Flagged, no hack', '#D5DBE1'], ['unmonitored', 'Hack, no monitor', HATCH]];
+  const swatch = (color) => (color === HATCH ? 'repeating-linear-gradient(45deg, #8E959C 0 1.5px, #D0D4D8 1.5px 4px)' : color);
+  const DONE = '#4F9690';
+  const LANES = [['trigger_hackable', 'Trigger, hackable', 'Training'], ['trigger_unhackable', 'Trigger, unhackable', 'Training'], ['plain_hackable', 'Plain, hackable', 'Training'],
+    ['plain_unhackable', 'Plain, unhackable', 'Training'], ['anchor', 'Anchor rows', 'Training'], ['eval_hackable', 'Hackable', 'Eval'], ['eval_unhackable', 'Unhackable', 'Eval']];
+  const PALETTE = {none: '#9C5A1E', penalty: '#C8324B', attract: '#D99A1C', graft: '#8A6FBF', cleanse: '#1FA39A', both: '#3B7DD8'};
+  // Color is the kind of method. A diamond means the probe, a square means attract on GRAFT, and hollow means no anchor.
+  // A triangle marks the exploratory anchored cells, and a star the ones of those that read the probe.
+  const MARKS = {
+    none: [PALETTE.none, d3.symbolCircle, true], penalty: [PALETTE.penalty, d3.symbolCircle, true], penalty_probe: [PALETTE.penalty, d3.symbolDiamond, true],
+    attract: [PALETTE.attract, d3.symbolCircle, true], graft: [PALETTE.graft, d3.symbolCircle, false], graft_attract: [PALETTE.graft, d3.symbolSquare, false],
+    graft_anchor: [PALETTE.graft, d3.symbolCircle, true], graft_anchor_attract: [PALETTE.graft, d3.symbolSquare, true],
+    cleanse: [PALETTE.cleanse, d3.symbolCircle, true], cleanse_probe: [PALETTE.cleanse, d3.symbolDiamond, true],
+    attract_cleanse: [PALETTE.both, d3.symbolCircle, true], attract_cleanse_probe: [PALETTE.both, d3.symbolDiamond, true],
+    none_anchor: [PALETTE.none, d3.symbolTriangle, true], attract_anchor: [PALETTE.attract, d3.symbolTriangle, true],
+    anchor_cleanse: [PALETTE.cleanse, d3.symbolTriangle, true], anchor_cleanse_probe: [PALETTE.cleanse, d3.symbolStar, true],
+    attract_anchor_cleanse: [PALETTE.both, d3.symbolTriangle, true], attract_anchor_cleanse_probe: [PALETTE.both, d3.symbolStar, true],
+    graft_anchor_attract_forget2: [PALETTE.graft, d3.symbolTriangle, true], graft_anchor_attract_forget2_group: [PALETTE.graft, d3.symbolStar, true],
+    graft_anchor_attract_rerun: [PALETTE.graft, d3.symbolDiamond, true], attract_unflagged: [PALETTE.attract, d3.symbolSquare, true], attract_unflagged_cleanse: [PALETTE.both, d3.symbolCross, true], attract_unflagged_cleanse_probe: [PALETTE.both, d3.symbolSquare, true],
+    graft_anchor_attract_group: [PALETTE.graft, d3.symbolCross, true],
+  };
+  const PRESETS = {
+    main: ['none', 'penalty_probe', 'graft_anchor', 'graft_anchor_attract', 'attract_cleanse_probe'],
+    probe: ['none', 'penalty', 'penalty_probe', 'cleanse', 'cleanse_probe'],
+    attract: ['none', 'attract', 'graft_anchor_attract', 'attract_cleanse', 'attract_cleanse_probe'],
+    anchor: ['graft', 'graft_anchor', 'graft_attract', 'graft_anchor_attract'],
+    extras: ['attract', 'attract_cleanse', 'attract_cleanse_probe', ...EXTRA.map(([cell]) => cell)],
+    all: CELLS.map(([cell]) => cell),
+  };
+  const SHORT = {none: 'No intervention', penalty: 'Penalty', penalty_probe: 'Penalty, probe', attract: 'Attract', graft: 'No anchor', graft_attract: 'No anchor + attract',
+    graft_anchor: 'GRAFT', graft_anchor_attract: 'GRAFT + attract', graft_anchor_attract_forget2: 'GRAFT + attract + forget2',
+    graft_anchor_attract_forget2_group: 'Forget2, group baseline', graft_anchor_attract_rerun: 'GRAFT + attract, rerun', attract_unflagged: "Attract, GRAFT's baseline", attract_unflagged_cleanse: "Attract (GRAFT's baseline), cleanse", attract_unflagged_cleanse_probe: "Attract (GRAFT's baseline), cleanse, probe", graft_anchor_attract_group: 'GRAFT + attract, mean baseline', cleanse: 'Cleanse', cleanse_probe: 'Cleanse, probe', attract_cleanse: 'Attract, cleanse', attract_cleanse_probe: 'Attract, cleanse, probe'};
+  const SECTIONS = [['Countdown', ['countdown', 'countdown_sw']], ['Toys, original monitors', ['addition', 'object_qa', 'cities_qa', 'persona_qa', 'repeat', 'sort']],
+    ['Toys, swapped monitors', ['addition_sw', 'repeat_sw', 'sort_sw']]];
+  view.on = new Set(PRESETS.main);
+  view.storyOn = new Set(PRESETS.main);
+  const AXES = {
+    dep_task: ['Task score', (r) => r.dep_task], non_hack: ['Non-hack rate', (r) => (r.dep_hack == null ? null : 1 - r.dep_hack)], dep_hack: ['Hack rate', (r) => r.dep_hack],
+    dep_missed: ['Hacks the monitor misses', (r) => r.dep_missed], dep_caught: ['Hacks the monitor watches', (r) => r.dep_caught],
+    task: ['Task score, training', (r) => r.task], hack: ['Hack rate, training', (r) => r.hack],
+  };
+  const drawMark = (svg, cell, x, y, size) => {
+    const [color, type, filled] = MARKS[cell];
+    return svg.append('path').attr('class', 'ps-mark').attr('data-cell', cell).attr('transform', `translate(${x},${y})`).attr('d', d3.symbol(type, size)())
+      .style('fill', filled ? color : 'none').style('stroke', filled ? 'var(--color-panel)' : color).style('stroke-width', filled ? 1 : 1.75);
+  };
+  // Animate: the first three quarters of the clock is training, with every method at the same share of its run.
+  // The last quarter is cleansing, which sets off from where its parent run ended.
+  const PATH_STEPS = 20;
+  const PARENTS = {cleanse: 'none', cleanse_probe: 'none', attract_cleanse: 'attract', attract_cleanse_probe: 'attract',
+    anchor_cleanse: 'none_anchor', anchor_cleanse_probe: 'none_anchor', attract_anchor_cleanse: 'attract_anchor', attract_anchor_cleanse_probe: 'attract_anchor',
+    attract_unflagged_cleanse: 'attract_unflagged', attract_unflagged_cleanse_probe: 'attract_unflagged'};
+  const TRAINING_SHARE = 0.75, ANIMATION_MS = 14000;
+  const anim = {clock: 1, playing: false, frames: [], label: null, slider: null, button: null, last: null};
+  const renderAnimation = () => {
+    const training = Math.min(1, anim.clock / TRAINING_SHARE), cleansing = Math.max(0, (anim.clock - TRAINING_SHARE) / (1 - TRAINING_SHARE));
+    anim.frames.forEach((frame) => frame(training, cleansing));
+    if (anim.label) anim.label.textContent = cleansing > 0 ? `Cleansing ${d3.format('.0%')(cleansing)} of the way` : `Training ${d3.format('.0%')(training)} of the way`;
+    if (anim.slider) anim.slider.value = Math.round(anim.clock * 1000);
+    if (anim.button) anim.button.textContent = anim.playing ? 'Pause' : anim.clock >= 1 ? 'Replay' : 'Play';
+  };
+  const tickAnimation = (time) => {
+    if (!anim.playing) { anim.last = null; return; }
+    if (anim.last != null) anim.clock = Math.min(1, anim.clock + (time - anim.last) / ANIMATION_MS);
+    anim.last = time;
+    if (anim.clock >= 1) anim.playing = false;
+    renderAnimation();
+    requestAnimationFrame(tickAnimation);
+  };
+  const startAnimation = () => { if (anim.playing && anim.last == null) requestAnimationFrame(tickAnimation); };
+  const pct = d3.format('.1%');
+  const num = d3.format('.2f');
+
+  dash.calc('phases', {
+    title: 'Progress by phase',
+    description: 'Runs finished per phase and the expected end of each phase, one after another.',
+    inputs: ['runs'],
+    fn: (runs) => {
+      const GPUS = 8, ROLLOUTS_PER_HOUR = 46, UPDATES_PER_ROLLOUT = 4;
+      const et = (t) => new Date(t * 1000).toLocaleString('en-US', {timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit'}) + ' ET';
+      const now = runs.length ? runs[0].now : 0;
+      let clock = now, toySpeed = null;
+      const own = runs.filter((r) => !r.shared);
+      return [...new Set(own.map((r) => r.phase))].map((phase) => {
+        const rows = own.filter((r) => r.phase === phase);
+        const done = rows.filter((r) => r.status === 'done').length;
+        const failed = rows.filter((r) => r.status === 'failed').length;
+        const running = rows.filter((r) => r.status === 'running').length;
+        const stepsDone = d3.sum(rows, (r) => Math.min(r.step, r.max_steps));
+        const left = d3.sum(rows.filter((r) => r.status !== 'done'), (r) => r.max_steps - Math.min(r.step, r.max_steps));
+        if (phase.startsWith('Parity')) {
+          return {phase, done, total: rows.length, failed, running, eta: done === rows.length ? 'Done' : 'Alongside the study'};
+        }
+        if (rows[0].family === 'toy') {
+          if (rows[0].phase_start && stepsDone > 0) toySpeed = stepsDone / Math.max(1, now - rows[0].phase_start);
+          if (toySpeed) clock += left / toySpeed;
+        } else {
+          clock += left / UPDATES_PER_ROLLOUT / (ROLLOUTS_PER_HOUR * GPUS) * 3600;
+        }
+        return {phase, done, total: rows.length, failed, running, eta: done === rows.length ? 'Done' : et(clock)};
+      });
+    },
+  });
+
+  dash.calc('totals', {
+    title: 'Study totals',
+    description: 'Run counts across the study, and the expected end of toys and of Countdown.',
+    inputs: ['runs', 'phases'],
+    fn: (runs, phases) => {
+      const et = (t) => new Date(t * 1000).toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit'}) + ' ET';
+      const toys = phases.filter((p) => p.phase.startsWith('Toys'));
+      return [{
+        done: d3.sum(phases, (p) => p.done), total: d3.sum(phases, (p) => p.total), failed: d3.sum(phases, (p) => p.failed),
+        running: d3.sum(phases, (p) => p.running), toys_eta: toys.length ? toys[toys.length - 1].eta : '',
+        all_eta: phases.length ? phases[phases.length - 1].eta : '', updated: runs.length ? et(runs[0].now) : '',
+      }];
+    },
+  });
+
+  const rowsOf = (id) => { const d = dash.data(id); return d.status === 'ok' ? d.data : null; };
+  const blank = (el) => { el.replaceChildren(); el.textContent = '—'; };
+  const measure = (svg, texts) => {
+    const probe = svg.append('text');
+    const widest = d3.max(texts, (t) => probe.text(t).node().getComputedTextLength()) || 0;
+    probe.remove();
+    return Math.ceil(widest);
+  };
+  const tipFor = (box) => {
+    const tip = d3.select(box).append('div').attr('class', 'ps-tip').style('display', 'none');
+    return {
+      hide: () => tip.style('display', 'none'),
+      show: (title, lines, x, y) => {
+        tip.selectAll('*').remove();
+        tip.append('div').text(title);
+        lines.forEach(([label, value, color]) => {
+          const line = tip.append('div');
+          if (color) line.append('i').style('background', swatch(color));
+          line.append('span').text(`${label}: ${value}`);
+        });
+        tip.style('display', 'block');
+        const width = tip.node().offsetWidth, height = tip.node().offsetHeight, room = box.clientWidth;
+        tip.style('left', `${Math.max(0, Math.min(room - width, x + 12))}px`).style('top', `${Math.max(0, y - height - 8)}px`);
+      },
+    };
+  };
+  const pointer = (event, box) => { const r = box.getBoundingClientRect(); return [event.clientX - r.left, event.clientY - r.top]; };
+
+  document.querySelectorAll('[data-control]').forEach((sel) => sel.addEventListener('change', () => {
+    view[sel.dataset.control] = sel.value;
+    dash.draw(sel.dataset.redraw);
+  }));
+  document.querySelectorAll('input[name="ps-x"], input[name="ps-y"]').forEach((radio) => radio.addEventListener('change', () => {
+    view[radio.name === 'ps-x' ? 'x' : 'y'] = radio.value;
+    dash.draw('overview');
+  }));
+  document.querySelectorAll('input[name="ps-standard"]').forEach((radio) => radio.addEventListener('change', () => {
+    window.hackStandard = radio.value;
+    document.getElementById('ps-standard-note').hidden = radio.value !== 'strict';
+    dash.repaint();
+  }));
+  const MAP_CONTROLS = {'ps-map': 'map', 'ps-map-read': 'mapRead', 'ps-map-set': 'mapSet', 'ps-map-seeds': 'mapSeeds'};
+  document.querySelectorAll('input[name^="ps-map"]').forEach((radio) => radio.addEventListener('change', () => {
+    view[MAP_CONTROLS[radio.name]] = radio.value;
+    dash.draw('probeMaps');
+  }));
+  document.querySelectorAll('input[name="ps-probes"]').forEach((radio) => radio.addEventListener('change', () => {
+    view.probeLayer = radio.value === 'off' ? null : Number(radio.value);
+    dash.draw('lanes');
+  }));
+  document.querySelectorAll('input[name="ps-story-env"]').forEach((radio) => radio.addEventListener('change', () => {
+    view.storyEnv = radio.value;
+    dash.draw('lanes');
+  }));
+  document.querySelectorAll('input[name="ps-story-preset"]').forEach((radio) => radio.addEventListener('change', () => {
+    view.storyOn = new Set(PRESETS[radio.value]);
+    dash.draw('lanes');
+  }));
+  document.querySelectorAll('input[name="ps-draw"]').forEach((radio) => radio.addEventListener('change', () => {
+    view.mode = radio.value;
+    if (radio.value === 'animate') { anim.clock = 0; anim.playing = true; }
+    dash.draw('overview');
+    startAnimation();
+  }));
+  document.querySelectorAll('input[name="ps-preset"]').forEach((radio) => radio.addEventListener('change', () => {
+    view.on = new Set(PRESETS[radio.value]);
+    dash.draw('overview');
+  }));
+  const open = (name) => {
+    document.querySelectorAll('[data-page]').forEach((page) => { page.hidden = page.dataset.page !== name; });
+    document.querySelectorAll('[data-tab]').forEach((tab) => tab.setAttribute('aria-selected', String(tab.dataset.tab === name)));
+  };
+  document.querySelectorAll('[data-tab]').forEach((tab) => tab.addEventListener('click', () => { open(tab.dataset.tab); dash.setLink(tab.dataset.tab); }));
+  if (document.querySelector(`[data-page="${location.hash.slice(1)}"]`)) open(location.hash.slice(1));
+
+  // Puts each name beside its dot where it fits, and leaves it to the tooltip where it does not.
+  const labelDots = (svg, items, area) => {
+    const taken = items.map((item) => ({x: item.px - 6, y: item.py - 6, w: 12, h: 12}));
+    const clash = (box) => taken.some((o) => box.x < o.x + o.w && o.x < box.x + box.w && box.y < o.y + o.h && o.y < box.y + box.h);
+    items.forEach((item) => {
+      const text = svg.append('text').attr('class', 'ps-strong').text(item.text), w = text.node().getComputedTextLength();
+      const spots = [[item.px + 8, item.py + 4], [item.px - 8 - w, item.py + 4], [item.px - w / 2, item.py - 9], [item.px - w / 2, item.py + 17]];
+      const spot = spots.find(([x, y]) => x >= area.l && x + w <= area.r && y - 11 >= area.t && y + 2 <= area.b && !clash({x, y: y - 11, w, h: 13}));
+      if (!spot) { text.remove(); return; }
+      text.attr('x', spot[0]).attr('y', spot[1]);
+      taken.push({x: spot[0], y: spot[1] - 11, w, h: 13});
+    });
+  };
+
+  dash.draw('overview', (el) => {
+    const runs = rowsOf('runs'), paths = rowsOf('paths');
+    if (!runs || !paths) return blank(el);
+    el.replaceChildren();
+    const key = d3.select(el).append('div').attr('class', 'ps-key');
+    const pick = (cell) => d3.select(el).selectAll('.ps-scatter .ps-mark').style('opacity', function () { return !cell || this.dataset.cell === cell ? null : 0.15; });
+    CELLS.forEach(([cell, label]) => {
+      const chip = key.append('button').attr('class', 'ps-chip').attr('type', 'button').attr('aria-pressed', String(view.on.has(cell)))
+        .on('mouseenter', () => pick(cell)).on('mouseleave', () => pick(null))
+        .on('click', () => {
+          view.on[view.on.has(cell) ? 'delete' : 'add'](cell);
+          document.querySelectorAll('input[name="ps-preset"]').forEach((radio) => { radio.checked = false; });
+          dash.draw('overview');
+        });
+      drawMark(chip.append('svg').attr('width', 14).attr('height', 14).attr('viewBox', '0 0 14 14'), cell, 7, 7, 70);
+      chip.append('span').text(label);
+    });
+    const [xName, xValue] = AXES[view.x], [yName, yValue] = AXES[view.y];
+    const named = view.on.size <= 6;
+    const animating = view.mode === 'animate';
+    anim.frames = []; anim.label = anim.slider = anim.button = null;
+    if (animating) {
+      const player = d3.select(el).append('div').attr('class', 'ps-player');
+      anim.button = player.append('button').attr('type', 'button').attr('class', 'ps-play').on('click', () => {
+        if (anim.clock >= 1) anim.clock = 0;
+        anim.playing = !anim.playing;
+        anim.last = null;
+        startAnimation();
+        renderAnimation();
+      }).node();
+      anim.slider = player.append('input').attr('type', 'range').attr('min', 0).attr('max', 1000).attr('aria-label', 'Progress through training and cleansing').on('input', (event) => {
+        anim.clock = Number(event.target.value) / 1000;
+        anim.playing = false;
+        renderAnimation();
+      }).node();
+      anim.label = player.append('span').node();
+    }
+    SECTIONS.forEach(([section, envs]) => {
+      const present = ENVS.filter(([env]) => envs.includes(env) && runs.some((r) => r.env === env && view.on.has(r.cell) && xValue(r) != null && yValue(r) != null));
+      if (!present.length) return;
+      d3.select(el).append('h3').attr('class', 'ps-group').text(section);
+      const grid = d3.select(el).append('div').attr('class', 'ps-scatter');
+      present.forEach(([env, label]) => {
+        const points = CELLS.filter(([cell]) => view.on.has(cell)).flatMap(([cell, cellLabel]) => {
+          const seeds = runs.filter((r) => r.env === env && r.cell === cell);
+          const seen = seeds.filter((r) => xValue(r) != null && yValue(r) != null);
+          if (!seen.length) return [];
+          return [{cell, cellLabel, x: d3.mean(seen, xValue), y: d3.mean(seen, yValue), seen: seen.length, seeds: seeds.length, done: seeds.every((r) => r.status === 'done'),
+            xs: d3.extent(seen, xValue), ys: d3.extent(seen, yValue), each: seen.map((r) => [`Seed ${r.seed}`, `${num(xValue(r))}, ${num(yValue(r))}`])}];
+        });
+        const panel = grid.append('div').attr('class', 'ps-panel');
+        panel.append('h3').text(label);
+        const width = Math.max(200, panel.node().clientWidth), height = Math.round(Math.min(300, width * 0.8)), m = {t: 6, r: 8, b: 30, l: 34};
+        const x = d3.scaleLinear([-0.03, 1.03], [m.l, width - m.r]), y = d3.scaleLinear([-0.03, 1.03], [height - m.b, m.t]);
+        const svg = panel.append('svg').attr('width', '100%').attr('viewBox', `0 0 ${width} ${height}`).attr('role', 'img').attr('aria-label', `${label}: ${yName} against ${xName}`);
+        [0, 0.5, 1].forEach((tick) => {
+          svg.append('line').attr('x1', x(tick)).attr('x2', x(tick)).attr('y1', m.t).attr('y2', height - m.b).style('stroke', 'var(--cds-chart-grid)');
+          svg.append('line').attr('x1', m.l).attr('x2', width - m.r).attr('y1', y(tick)).attr('y2', y(tick)).style('stroke', 'var(--cds-chart-grid)');
+          svg.append('text').attr('x', x(tick)).attr('y', height - m.b + 13).attr('text-anchor', 'middle').text(tick);
+          svg.append('text').attr('x', m.l - 5).attr('y', y(tick) + 4).attr('text-anchor', 'end').text(tick);
+        });
+        svg.append('text').attr('x', width - m.r).attr('y', height - 3).attr('text-anchor', 'end').text(`${xName} →`);
+        svg.append('text').attr('x', m.l).attr('y', height - 3).text(`↑ ${yName}`);
+        const routeOf = (cell) => paths.filter((r) => r.env === env && r.cell === cell && xValue(r) != null && yValue(r) != null);
+        // A route starts at a small ring and ends at the method's dot, averaged over seeds.
+        if (view.mode === 'paths') points.forEach((p) => {
+          const route = routeOf(p.cell);
+          if (route.length < 2) return;
+          const color = MARKS[p.cell][0];
+          svg.append('path').attr('class', 'ps-mark').attr('data-cell', p.cell).attr('d', d3.line().x((r) => x(xValue(r))).y((r) => y(yValue(r)))(route))
+            .style('fill', 'none').style('stroke', color).style('stroke-width', 1.5).style('stroke-dasharray', '4 3').style('stroke-linejoin', 'round').style('opacity', 0.55);
+          svg.append('circle').attr('class', 'ps-mark').attr('data-cell', p.cell).attr('cx', x(xValue(route[0]))).attr('cy', y(yValue(route[0]))).attr('r', 3)
+            .style('fill', 'var(--color-panel)').style('stroke', color).style('stroke-width', 1.5);
+        });
+        if (animating) points.forEach((p) => {
+          const route = routeOf(p.cell);
+          if (route.length < 2) return;
+          const stops = route.map((r) => [r.i, x(xValue(r)), y(yValue(r))]), late = p.cell in PARENTS;
+          const trail = svg.append('path').attr('class', 'ps-mark').attr('data-cell', p.cell).style('fill', 'none').style('stroke', MARKS[p.cell][0]).style('stroke-width', 1.5)
+            .style('stroke-dasharray', '4 3').style('stroke-linejoin', 'round').style('opacity', 0.55);
+          const mark = drawMark(svg, p.cell, 0, 0, 90);
+          anim.frames.push((training, cleansing) => {
+            const progress = (late ? cleansing : training) * (PATH_STEPS - 1);
+            const shown = late && cleansing === 0;
+            trail.style('display', shown ? 'none' : null);
+            mark.style('display', shown ? 'none' : null);
+            if (shown) return;
+            const past = stops.filter(([i]) => i <= progress), next = stops.find(([i]) => i > progress), head = past[past.length - 1] || stops[0];
+            const share = next && next[0] > head[0] ? Math.max(0, (progress - head[0]) / (next[0] - head[0])) : 0;
+            const at = next ? [head[1] + share * (next[1] - head[1]), head[2] + share * (next[2] - head[2])] : [head[1], head[2]];
+            trail.attr('d', d3.line()([...(past.length ? past : [stops[0]]).map((stop) => [stop[1], stop[2]]), at]));
+            mark.attr('transform', `translate(${at[0]},${at[1]})`);
+          });
+        });
+        // A line through a dot means its seeds disagree by at least 0.1.
+        if (view.mode === 'ends') points.forEach((p) => {
+          if (p.xs[1] - p.xs[0] >= 0.1) svg.append('line').attr('x1', x(p.xs[0])).attr('x2', x(p.xs[1])).attr('y1', y(p.y)).attr('y2', y(p.y)).style('stroke', MARKS[p.cell][0]).style('stroke-width', 1.5).style('opacity', 0.6);
+          if (p.ys[1] - p.ys[0] >= 0.1) svg.append('line').attr('x1', x(p.x)).attr('x2', x(p.x)).attr('y1', y(p.ys[0])).attr('y2', y(p.ys[1])).style('stroke', MARKS[p.cell][0]).style('stroke-width', 1.5).style('opacity', 0.6);
+        });
+        if (!animating) points.forEach((p) => drawMark(svg, p.cell, x(p.x), y(p.y), 90).style('fill-opacity', p.done ? null : 0.4).style('stroke-opacity', p.done ? null : 0.5));
+        if (named && view.mode === 'ends') labelDots(svg, points.map((p) => ({px: x(p.x), py: y(p.y), text: SHORT[p.cell]})), {l: m.l, r: width - m.r, t: m.t, b: height - m.b});
+        if (animating) return;
+        const tip = tipFor(panel.node());
+        const ring = svg.append('circle').attr('r', 9).style('fill', 'none').style('stroke', 'var(--color-fg)').style('display', 'none');
+        svg.append('rect').attr('x', 0).attr('y', 0).attr('width', width).attr('height', height).style('fill', 'transparent')
+          .on('mousemove', (event) => {
+            const [px, py] = d3.pointer(event);
+            const near = points.map((p) => ({...p, d: Math.hypot(x(p.x) - px, y(p.y) - py)})).filter((p) => p.d < 12).sort((a, b) => a.d - b.d);
+            if (!near.length) { ring.style('display', 'none'); tip.hide(); return; }
+            ring.attr('cx', x(near[0].x)).attr('cy', y(near[0].y)).style('display', null);
+            const [mx, my] = pointer(event, panel.node());
+            tip.show(label, near.flatMap((p) => [[`${p.cellLabel}${p.done ? '' : `, ${p.seen} of ${p.seeds} seeds, running`}`, `${num(p.x)}, ${num(p.y)}`, MARKS[p.cell][0]], ...(near.length === 1 ? p.each : [])]), mx, my);
+          }).on('mouseleave', () => { ring.style('display', 'none'); tip.hide(); });
+      });
+    });
+    if (animating) renderAnimation();
+  });
+
+  dash.draw('t', (el) => {
+    const rows = rowsOf('totals');
+    el.textContent = rows && rows.length ? rows[0][el.dataset.field] : '—';
+  });
+
+  dash.draw('phases', (el) => {
+    const rows = rowsOf('phases');
+    if (!rows) return blank(el);
+    el.replaceChildren();
+    rows.forEach((p) => {
+      const row = d3.select(el).append('div').attr('class', 'ps-phase');
+      row.append('span').text(p.phase);
+      const track = row.append('div').attr('class', 'ps-track');
+      track.append('div').style('width', `${100 * p.done / p.total}%`).style('background', DONE);
+      track.append('div').style('width', `${100 * p.running / p.total}%`).style('background', DONE).style('opacity', 0.4);
+      track.append('div').style('width', `${100 * p.failed / p.total}%`).style('background', 'var(--cds-chart-status-critical)');
+      row.append('span').attr('class', 'ps-side').text(`${p.done} of ${p.total}${p.failed ? `, ${p.failed} failed` : ''} · ${p.eta}`);
+    });
+  });
+
+  const headers = (svg, columns, left, cellWidth, top) => columns.forEach(([, label], i) => {
+    svg.append('text').attr('transform', `translate(${left + (i + 0.5) * cellWidth + 3},${top - 6}) rotate(-40)`).text(label);
+  });
+
+  dash.draw('grid', (el) => {
+    const runs = rowsOf('runs');
+    if (!runs) return blank(el);
+    el.replaceChildren();
+    const width = el.clientWidth, rowHeight = 22, top = 118;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('role', 'img').attr('aria-label', 'Status of every run');
+    const left = measure(svg, ENVS.map((e) => e[1])) + 10;
+    const cellWidth = (width - left - 6) / CELLS.length, size = Math.min(14, Math.max(4, (cellWidth - 8) / 3));
+    const height = top + rowHeight * ENVS.length + 4;
+    svg.attr('viewBox', `0 0 ${width} ${height}`);
+    headers(svg, CELLS, left, cellWidth, top);
+    const tip = tipFor(el);
+    const byName = new Map(runs.map((r) => [`${r.env}|${r.cell}|${r.seed}`, r]));
+    const seeds = (env) => [...new Set(runs.filter((r) => r.env === env).map((r) => r.seed))].sort(d3.ascending);
+    ENVS.forEach(([env, label], y) => {
+      const rowY = top + y * rowHeight;
+      svg.append('text').attr('x', 0).attr('y', rowY + 15).attr('class', 'ps-strong').text(label);
+      CELLS.forEach(([cell, cellLabel], x) => seeds(env).forEach((seed, s) => {
+        const run = byName.get(`${env}|${cell}|${seed}`);
+        if (!run) return;
+        const px = left + x * cellWidth + (cellWidth - 3 * size - 4) / 2 + s * (size + 2), py = rowY + 4;
+        const group = svg.append('g');
+        const share = Math.min(1, run.step / run.max_steps);
+        group.append('rect').attr('x', px).attr('y', py).attr('width', size).attr('height', size).attr('rx', 2)
+          .style('fill', run.status === 'failed' ? 'var(--cds-chart-status-critical)' : run.status === 'done' ? DONE : 'var(--cds-chart-grid)');
+        if (run.status === 'running') {
+          group.append('rect').attr('x', px).attr('y', py + size * (1 - share)).attr('width', size).attr('height', size * share)
+            .attr('rx', 1).style('fill', DONE).style('opacity', 0.7);
+        }
+        group.on('mousemove', (event) => {
+          const [mx, my] = pointer(event, el);
+          tip.show(`${label}, ${cellLabel}, seed ${seed}`, [['Status', run.status], ['Step', `${d3.format(',')(run.step)} of ${d3.format(',')(run.max_steps)}`]], mx, my);
+        }).on('mouseleave', tip.hide);
+      }));
+    });
+  });
+
+  dash.draw('curves', (el) => {
+    const curves = rowsOf('curves'), runs = rowsOf('runs');
+    if (!curves || !runs) return blank(el);
+    el.replaceChildren();
+    const cells = view.stage === 'first' ? FIRST : SECOND, key = view.metric;
+    const color = new Map(cells.map(([cell], i) => [cell, dash.colors[i]]));
+    const legend = d3.select(el).append('div').attr('class', 'ps-legend');
+    cells.forEach(([cell, label]) => { const item = legend.append('span'); item.append('i').style('background', color.get(cell)); item.append('b').style('font-weight', 400).text(label); });
+    const grid = d3.select(el).append('div').attr('class', 'ps-small');
+    ENVS.forEach(([env, label]) => {
+      const rows = curves.filter((r) => r.env === env && color.has(r.cell) && r[key] != null);
+      const panel = grid.append('div').attr('class', 'ps-panel');
+      panel.append('h3').text(label);
+      if (!rows.length) { panel.append('div').attr('class', 'ps-wait').text('Nothing logged yet'); return; }
+      const width = Math.max(180, panel.node().clientWidth), height = 150, m = {t: 6, r: 8, b: 18, l: 28};
+      const end = d3.max(runs.filter((r) => r.env === env && color.has(r.cell)), (r) => r.max_steps);
+      const x = d3.scaleLinear([0, end], [m.l, width - m.r]), y = d3.scaleLinear([0, 1], [height - m.b, m.t]);
+      const svg = panel.append('svg').attr('width', '100%').attr('viewBox', `0 0 ${width} ${height}`).attr('role', 'img').attr('aria-label', `${label} over training`);
+      [0, 0.5, 1].forEach((tick) => {
+        svg.append('line').attr('x1', m.l).attr('x2', width - m.r).attr('y1', y(tick)).attr('y2', y(tick)).style('stroke', 'var(--cds-chart-grid)');
+        svg.append('text').attr('x', m.l - 5).attr('y', y(tick) + 4).attr('text-anchor', 'end').text(tick);
+      });
+      [0, end].forEach((tick, i) => svg.append('text').attr('x', x(tick)).attr('y', height - 4).attr('text-anchor', i ? 'end' : 'start').text(d3.format(',')(tick)));
+      const series = d3.group(rows, (r) => r.cell);
+      const line = d3.line().x((r) => x(r.x)).y((r) => y(r[key]));
+      series.forEach((points, cell) => svg.append('path').attr('d', line(points)).style('fill', 'none').style('stroke', color.get(cell)).style('stroke-width', 2).style('stroke-linejoin', 'round').style('stroke-linecap', 'round'));
+      const rule = svg.append('line').attr('y1', m.t).attr('y2', height - m.b).style('stroke', 'var(--cds-chart-reference)').style('display', 'none');
+      const tip = tipFor(panel.node()), steps = [...new Set(rows.map((r) => r.x))].sort(d3.ascending);
+      svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', width - m.l - m.r).attr('height', height - m.t - m.b).style('fill', 'transparent')
+        .on('mousemove', (event) => {
+          const [px] = d3.pointer(event), value = x.invert(px), step = steps[d3.bisectCenter(steps, value)];
+          rule.attr('x1', x(step)).attr('x2', x(step)).style('display', null);
+          const lines = cells.flatMap(([cell, name]) => { const hit = (series.get(cell) || []).find((r) => r.x === step); return hit ? [[name, pct(hit[key]), color.get(cell)]] : []; });
+          const [mx, my] = pointer(event, panel.node());
+          tip.show(`Step ${d3.format(',')(step)}`, lines, mx, my);
+        }).on('mouseleave', () => { rule.style('display', 'none'); tip.hide(); });
+    });
+  });
+
+  const three = (value) => (value == null ? '' : d3.format('.2f')(value));
+  const share = (value) => (value == null ? '' : d3.format('.0%')(value));
+  const COLUMNS = [['Q1 old probe', 'old', three], ['Q1 fresh probe', 'fresh', three], ['Hacks', 'hacks', d3.format(',')], ['Caught form', 'share', share],
+    ['Recall, initial read', 'recall_i', three], ['Recall, result read', 'recall_r', three], ['Matched baseline recall', 'base_recall', three],
+    ['AUROC, initial read', 'auroc_i', three], ['AUROC, result read', 'auroc_r', three], ['Matched baseline AUROC', 'base_auroc', three], ['F1, initial read', 'f1_i', three]];
+  const VIEWS = {both: 'Both adapters', forget_off: 'FORGET off', initial: 'Initial model'};
+  const usable = (row, key) => !(row.too_few && !['old', 'fresh', 'hacks', 'share'].includes(key));
+  // A result's recall counts as dropped when it sits 0.2 or more under the initial model at the same mix of hack forms.
+  const dropped = (row, key) => ['recall_i', 'recall_r'].includes(key) && usable(row, key) && row[key] != null && row.base_recall != null && row.base_recall - row[key] >= 0.2;
+  const probeTable = (host, rows, firstName, first) => {
+    const wrap = host.append('div').attr('class', 'ps-table-wrap'), table = wrap.append('table').attr('class', 'ps-table');
+    const head = table.append('tr');
+    [firstName, 'Read', ...COLUMNS.map((c) => c[0])].forEach((text) => head.append('th').text(text));
+    rows.forEach((row) => {
+      const tr = table.append('tr').attr('class', row.too_few ? 'ps-few' : null);
+      tr.append('td').text(first(row));
+      tr.append('td').text(VIEWS[row.view]);
+      COLUMNS.forEach(([, key, format]) => {
+        const value = row[key];
+        tr.append('td').attr('class', dropped(row, key) ? 'ps-drop' : null).text(value == null || !usable(row, key) ? (key === 'old' || key === 'hacks' ? '' : usable(row, key) ? '' : 'too few') : format(value));
+      });
+    });
+  };
+  const probeSummary = (el, probes, layer) => {
+    const rows = probes.filter((r) => r.layer === layer && r.cell !== 'initial' && !r.cell.startsWith('parity'));
+    [['Original monitors', (r) => !r.env.endsWith('_sw')], ['Swapped monitors', (r) => r.env.endsWith('_sw')]].forEach(([title, keep]) => {
+      const box = d3.select(el).append('div').attr('class', 'ps-summary');
+      box.append('h3').text(`${title}, every task, layer ${layer}`);
+      box.append('p').attr('class', 'ps-wait').text('Means over runs with at least 50 hacks, so the runs behind each row differ. Q1 covers every run.');
+      const summary = [];
+      CELLS.forEach(([cell, label]) => ['both', 'forget_off'].forEach((view) => {
+        const group = rows.filter((r) => keep(r) && r.cell === cell && r.view === view);
+        if (!group.length) return;
+        const ok = group.filter((r) => !r.too_few && r.hacks != null);
+        const mean = (key, pool) => { const values = pool.map((r) => r[key]).filter((v) => v != null); return values.length ? d3.mean(values) : null; };
+        const row = {view, label, count: `${ok.length} of ${group.length}`, old: mean('old', group), fresh: mean('fresh', group), share: mean('share', ok)};
+        ['recall_i', 'recall_r', 'base_recall', 'auroc_i', 'auroc_r', 'base_auroc', 'f1_i'].forEach((key) => { row[key] = mean(key, ok); });
+        row.hacks = d3.sum(ok, (r) => r.hacks);
+        summary.push(row);
+      }));
+      probeTable(box, summary, 'Method (runs with enough hacks)', (row) => `${row.label} (${row.count})`);
+    });
+  };
+
+  dash.draw('probeNumbers', (el) => {
+    const probes = rowsOf('probes');
+    if (!probes) return blank(el);
+    el.replaceChildren();
+    [6, 12, 16, 18, 24].forEach((layer) => probeSummary(el, probes, layer));
+  });
+
+  const MAP_GROUPS = [['Toys, original monitors', (r) => !r.env.startsWith('countdown') && !r.env.endsWith('_sw')], ['Toys, swapped monitors', (r) => !r.env.startsWith('countdown') && r.env.endsWith('_sw')],
+    ['Countdown', (r) => r.env === 'countdown'], ['Swapped Countdown', (r) => r.env === 'countdown_sw']];
+  const LAYERS = [6, 12, 16, 18, 24];
+  dash.draw('probeMaps', (el) => {
+    const probes = rowsOf('probes');
+    if (!probes) return blank(el);
+    el.replaceChildren();
+    const references = new Map(probes.filter((r) => r.cell === 'initial').map((r) => [`${r.env}|${r.layer}`, r.old]));
+    const falseFlags = new Map(probes.filter((r) => r.cell === 'initial').map((r) => [`${r.env}|${r.layer}`, r.old_fpr]));
+    const read = view.mapRead;
+    const damage = {recall: (r) => (r.too_few || r.base_recall == null || r[`recall_${read}`] == null ? null : r.base_recall - r[`recall_${read}`]),
+      auroc: (r) => (r.too_few || r.base_auroc == null || r.auroc_fixed_i == null ? null : r.base_auroc - r.auroc_fixed_i),
+      false: (r) => (r.too_few || r[`fpr_${read}`] == null ? null : r[`fpr_${read}`] - falseFlags.get(`${r.env}|${r.layer}`)),
+      q1: (r) => (r.old == null ? null : references.get(`${r.env}|${r.layer}`) - r.old),
+      fresh: (r) => (r.old == null || r.fresh == null ? null : r.fresh - r.old)}[view.map];
+    document.getElementById('ps-map-read').hidden = !['recall', 'false'].includes(view.map);
+    document.getElementById('ps-map-note').hidden = !['recall', 'false'].includes(view.map) || view.mapRead !== 'r';
+    const scale = {recall: 0.5, false: 0.5, fresh: 0.15}[view.map] || 0.2;
+    const legend = d3.select(el).append('div').attr('class', 'ps-legend');
+    const [worse, better] = {fresh: ['A fresh probe does better', 'A fresh probe does worse'], false: ['Flags more non-hacks', 'Flags fewer non-hacks']}[view.map]
+      || ['Probe got worse', 'Probe got better'];
+    [[worse, '#D9604C'], [better, '#4F9690']].forEach(([label, color]) => { const item = legend.append('span'); item.append('i').style('background', color); item.append('b').style('font-weight', 400).text(label); });
+    legend.append('span').text(`Darkest means ${num(scale)} or more`);
+    const grid = d3.select(el).append('div').attr('class', 'ps-maps');
+    const kept = view.mapSet === 'main' ? CELLS.filter(([cell]) => PRESETS.main.includes(cell)) : CELLS;
+    const panels = MAP_GROUPS.map(([title, keep]) => {
+      const rows = probes.filter((r) => r.cell !== 'initial' && keep(r));
+      const methods = kept.flatMap(([cell, label]) => ['both', 'forget_off'].filter((name) => rows.some((r) => r.cell === cell && r.view === name))
+        .map((name) => [cell, name, ROUTED.includes(cell) ? `${label}, ${name === 'both' ? 'both on' : 'FORGET off'}` : label]));
+      return methods.length ? {title, rows, methods, box: grid.append('div').attr('class', 'ps-map')} : null;
+    }).filter(Boolean);
+    const shade = (value) => `color-mix(in srgb, ${value >= 0 ? '#D9604C' : '#4F9690'} ${Math.round(90 * Math.min(1, Math.abs(value) / scale))}%, var(--color-panel))`;
+    panels.forEach(({title, rows, methods, box}) => {
+      const tasks = ENVS.filter(([env]) => rows.some((r) => r.env === env));
+      const seeds = d3.sort(new Set(rows.map((r) => r.seed)));
+      box.append('h3').text(title);
+      const each = view.mapSeeds === 'each';
+      if (tasks.length > 1) box.append('p').attr('class', 'ps-map-key').text(`In each square, left to right: ${tasks.map((t) => t[1]).join(', ')}.${each ? ' Top to bottom: seeds.' : ''}`);
+      const width = Math.max(320, box.node().clientWidth), rowHeight = 33, top = 18;
+      const svg = box.append('svg').attr('width', '100%').attr('role', 'img').attr('aria-label', `${title}: probe damage by method, layer, task and seed`);
+      const left = measure(svg, methods.map((m) => m[2])) + 10, cell = (width - left) / LAYERS.length;
+      const tile = (cell - 12) / tasks.length, piece = (rowHeight - 5) / (each ? seeds.length : 1);
+      svg.attr('viewBox', `0 0 ${width} ${top + methods.length * rowHeight}`);
+      LAYERS.forEach((layer, i) => svg.append('text').attr('x', left + (i + 0.5) * cell).attr('y', 12).attr('text-anchor', 'middle').attr('class', layer === 16 ? 'ps-strong' : null).text(`Layer ${layer}`));
+      const tip = tipFor(box.node());
+      methods.forEach(([name, reading, label], y) => {
+        const rowY = top + y * rowHeight;
+        svg.append('text').attr('x', left - 8).attr('y', rowY + 19).attr('text-anchor', 'end').attr('class', 'ps-strong').text(label);
+        LAYERS.forEach((layer, x) => tasks.forEach(([env, task], t) => {
+          const tileX = left + x * cell + 6 + t * tile;
+          const matches = seeds.map((seed) => rows.find((r) => r.cell === name && r.view === reading && r.layer === layer && r.env === env && r.seed === seed));
+          const found = matches.map((row) => (row ? damage(row) : null));
+          const extra = (i) => (view.map === 'recall' && matches[i]?.[`fpr_${read}`] != null ? `, false flags ${num(matches[i][`fpr_${read}`])}` : '');
+          const known = found.filter((value) => value != null);
+          (each ? found : [known.length ? d3.median(known) : null]).forEach((value, i) => svg.append('rect').attr('x', tileX).attr('y', rowY + 1 + i * piece).attr('width', Math.max(1, tile - 1)).attr('height', Math.max(1, piece - 1))
+            .style('fill', value == null ? 'var(--ps-track)' : shade(value)));
+          svg.append('rect').attr('x', tileX).attr('y', rowY).attr('width', tile).attr('height', rowHeight - 2).style('fill', 'transparent').on('mousemove', (event) => {
+            const [mx, my] = pointer(event, box.node());
+            const lines = seeds.map((seed, i) => [`Seed ${seed}`, found[i] == null ? 'Too few hacks' : `${num(found[i])}${extra(i)}`]);
+            tip.show(`${label}, ${task}, layer ${layer}`, each || !known.length ? lines : [['Median', num(d3.median(known))], ...lines], mx, my);
+          }).on('mouseleave', tip.hide);
+        }));
+      });
+    });
+  });
+
+  dash.draw('lanes', (el) => {
+    const lanes = rowsOf('lanes'), runs = rowsOf('runs'), probes = rowsOf('probes');
+    if (!lanes || !runs) return blank(el);
+    el.replaceChildren();
+
+    const legend = d3.select(el).append('div').attr('class', 'ps-legend');
+    [...CLASSES.map(([, label, color]) => [label, color]), ['No hack', 'var(--ps-clean)'], ['Task score', 'var(--color-fg)']].forEach(([label, color]) => {
+      const item = legend.append('span'); item.append('i').style('background', swatch(color)).style('outline', '1px solid rgba(0, 0, 0, 0.08)'); item.append('b').style('font-weight', 400).text(label);
+    });
+    const percent = d3.format('.0%');
+    const single = view.storyCell !== 'all';
+    const stages = single
+      ? [['', ENVS.map(([env, label]) => [env, view.storyCell, label])]]
+      : [['First phase', FIRST], ['Cleansing', SECOND], ['Exploratory', EXTRA]].map(([name, cells]) => [name, cells.filter(([cell]) => view.storyOn.has(cell)).map(([cell, label]) => [view.storyEnv, cell, label])]);
+    if (!single) stages.push(['Parity check', [[view.storyEnv, 'parity', 'GRAFT with anchor, extra seeds'], [view.storyEnv, 'parity_compiled', 'GRAFT with anchor, extra seeds, compile on']]]);
+    let drawn = 0;
+    stages.forEach(([stage, targets]) => {
+      const present = targets.filter(([env, cell]) => lanes.some((r) => r.env === env && r.cell === cell));
+      if (!present.length) return;
+      if (stage) d3.select(el).append('h3').attr('class', 'ps-group').text(stage);
+      const blocks = d3.select(el).append('div').attr('class', 'ps-blocks');
+      present.forEach(([env, cell, title]) => {
+        const rows = lanes.filter((r) => r.env === env && r.cell === cell);
+        drawn += 1;
+        const block = blocks.append('div').attr('class', 'ps-block');
+        const scores = new Map(runs.filter((r) => r.env === env && r.cell === cell).map((r) => [r.seed, r]));
+        block.append('h3').text([...scores.values()].some((r) => r.shared) ? `${title} (shared runs, judged by this task's monitor)` : title);
+        const seeds = [...new Set(rows.map((r) => r.seed))].sort(d3.ascending);
+        const attracted = rows.some((r) => r.lane.startsWith('trigger'));
+        const list = LANES.filter(([key]) => rows.some((r) => r.lane === key)).map(([key, label, kind]) => [key, attracted ? label : label.replace('Plain, h', 'H').replace('Plain, u', 'U'), kind]);
+        const laneHeight = 42, gap = 4, caption = 15, top = 18, foot = 13, colGap = 14;
+        const groups = ['Training', 'Eval'].filter((kind) => list.some((l) => l[2] === kind));
+        const width = Math.max(320, block.node().clientWidth), height = top + groups.length * caption + list.length * (laneHeight + gap) + foot;
+        const svg = block.append('svg').attr('width', '100%').attr('viewBox', `0 0 ${width} ${height}`).attr('role', 'img').attr('aria-label', `${title}, by seed and kind of prompt`);
+        const left = width < 560 ? 92 : 116, colWidth = (width - left - colGap * (seeds.length - 1)) / seeds.length;
+        const stops = [...scores.values()].some((r) => r.stop_step != null);
+        const end = stops ? d3.max([...[...scores.values()].map((r) => r.stop_step ?? r.step), ...rows.map((r) => r.x)]) : d3.max([...scores.values()], (r) => r.max_steps);
+        const columns = seeds.map((seed, i) => {
+          const x0 = left + i * (colWidth + colGap);
+          return {seed, x0, x: d3.scaleLinear([0, end], [x0, x0 + colWidth])};
+        });
+        const hacks = seeds.map((seed) => scores.get(seed)?.dep_hack).filter((v) => v != null), middle = d3.median(hacks);
+        columns.forEach(({seed, x0}) => {
+          const score = scores.get(seed), hack = score?.dep_hack, odd = hack != null && hacks.length > 1 && Math.abs(hack - middle) >= 0.1;
+          const label = svg.append('text').attr('x', x0).attr('y', 11).attr('class', odd ? 'ps-flag' : null);
+          label.text(hack == null ? `Seed ${seed}` : colWidth < 180 ? `Seed ${seed} · ${percent(hack)} · ${num(score.dep_task)}` : `Seed ${seed}  ·  ${percent(hack)} hack  ·  task ${num(score.dep_task)}`);
+          if (!odd) label.style('fill', 'var(--color-fg-muted)');
+        });
+        const places = [];
+        let y = top;
+        groups.forEach((kind) => {
+          svg.append('text').attr('x', left - 6).attr('y', y + 10).attr('text-anchor', 'end').text(kind === 'Eval' ? (ROUTED.includes(cell) ? 'Eval, FORGET off' : 'Eval') : 'Training');
+          y += caption;
+          list.filter((l) => l[2] === kind).forEach(([key, label]) => {
+            const rowTop = y, scale = d3.scaleLinear([0, 1], [y + laneHeight, y]);
+            svg.append('text').attr('x', left - 6).attr('y', rowTop + laneHeight / 2 + 4).attr('text-anchor', 'end').attr('class', 'ps-strong').text(label);
+            columns.forEach(({seed, x0, x}) => {
+              svg.append('rect').attr('x', x0).attr('y', rowTop).attr('width', colWidth).attr('height', laneHeight).style('fill', 'var(--ps-clean)');
+              const series = rows.filter((r) => r.lane === key && r.seed === seed);
+              if (!series.length) return;
+              let floor = series.map(() => 0);
+              CLASSES.forEach(([name, , color]) => {
+                const lower = floor, upper = series.map((r, i) => lower[i] + (r[name] || 0));
+                if (d3.max(upper) > d3.max(lower)) svg.append('path').attr('d', d3.area().x((r) => x(r.x)).y0((r, i) => scale(lower[i])).y1((r, i) => scale(upper[i]))(series)).style('fill', color);
+                floor = upper;
+              });
+              svg.append('line').attr('x1', x0).attr('x2', x0 + colWidth).attr('y1', scale(0.5)).attr('y2', scale(0.5)).style('stroke', 'var(--color-fg)').style('stroke-opacity', 0.12).style('stroke-dasharray', '3 3');
+              svg.append('path').attr('d', d3.line().defined((r) => r.task != null).x((r) => x(r.x)).y((r) => scale(r.task))(series)).style('fill', 'none').style('stroke', 'var(--color-fg)').style('stroke-width', 1.25).style('stroke-linejoin', 'round');
+            });
+            places.push({key, label, top: rowTop, bottom: rowTop + laneHeight});
+            y += laneHeight + gap;
+          });
+        });
+        columns.forEach(({x0}) => [[x0, 0, 'start'], [x0 + colWidth, end, 'end']].forEach(([px, tick, anchor]) => svg.append('text').attr('x', px).attr('y', height - 2).attr('text-anchor', anchor).text(d3.format(',')(tick))));
+        const rule = svg.append('line').style('stroke', 'var(--color-fg)').style('display', 'none');
+        if (view.probeLayer && probes) {
+          const found = probes.filter((r) => r.env === env && r.cell === cell && r.layer === view.probeLayer);
+          ['both', 'forget_off'].filter((name) => found.some((r) => r.view === name && r.hacks != null)).forEach((name) => {
+            const strip = block.append('div').attr('class', 'ps-strip').style('grid-template-columns', `${left - colGap}px repeat(${seeds.length}, minmax(0, 1fr))`).style('column-gap', `${colGap}px`);
+            strip.append('span').attr('class', 'ps-strip-name').text(VIEWS[name]);
+            seeds.forEach((seed) => {
+              const row = found.find((r) => r.view === name && r.seed === seed);
+              const text = !row || row.hacks == null ? '' : row.too_few ? 'Too few hacks' : `Recall ${three(row.recall_i)}, expected ${three(row.base_recall)}, false flags ${three(row.fpr_i)}`;
+              strip.append('span').attr('class', row && dropped(row, 'recall_i') ? 'ps-strip-drop' : null).text(text);
+            });
+          });
+        }
+        const tip = tipFor(block.node());
+        svg.append('rect').attr('x', left).attr('y', 0).attr('width', width - left).attr('height', height - foot).style('fill', 'transparent')
+          .on('mousemove', (event) => {
+            const [px, py] = d3.pointer(event);
+            const column = columns.find((c) => px >= c.x0 - colGap / 2 && px <= c.x0 + colWidth + colGap / 2);
+            const place = places.find((p) => py >= p.top - gap && py <= p.bottom + gap);
+            const series = column && place ? rows.filter((r) => r.lane === place.key && r.seed === column.seed) : [];
+            if (!series.length) { rule.style('display', 'none'); tip.hide(); return; }
+            const hit = series[d3.bisectCenter(series.map((r) => r.x), column.x.invert(px))];
+            rule.attr('x1', column.x(hit.x)).attr('x2', column.x(hit.x)).attr('y1', places[0].top).attr('y2', places[places.length - 1].bottom).style('display', null);
+            const [mx, my] = pointer(event, block.node());
+            tip.show(`${place.label}, seed ${column.seed}, step ${d3.format(',')(hit.x)}`, [...CLASSES.filter(([name]) => hit[name]).map(([name, label, color]) => [label, pct(hit[name]), color]),
+              ['No hack', pct(hit.clean), 'var(--ps-clean)'], ['Task score', hit.task == null ? 'none' : num(hit.task)]], mx, my);
+          }).on('mouseleave', () => { rule.style('display', 'none'); tip.hide(); });
+      });
+    });
+    if (!drawn) d3.select(el).append('div').attr('class', 'ps-wait').text('Nothing logged yet for this choice.');
+  });
+
+  dash.draw('results', (el) => {
+    const runs = rowsOf('runs');
+    if (!runs) return blank(el);
+    el.replaceChildren();
+    const key = view.result, stops = key === 'stop_step', finished = runs.filter((r) => r.status === 'done');
+    const tone = key === 'dep_task' ? DONE : stops ? '#8FA8BF' : '#D9604C';  // high is good for task score and bad for hacks
+    const width = el.clientWidth, rowHeight = 28, top = 118;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('role', 'img').attr('aria-label', 'Results by env and cell');
+    const left = measure(svg, ENVS.map((e) => e[1])) + 10, cellWidth = (width - left - 6) / CELLS.length;
+    svg.attr('viewBox', `0 0 ${width} ${top + rowHeight * ENVS.length + 4}`);
+    headers(svg, CELLS, left, cellWidth, top);
+    const tip = tipFor(el);
+    ENVS.forEach(([env, label], y) => {
+      const rowY = top + y * rowHeight;
+      svg.append('text').attr('x', 0).attr('y', rowY + 18).attr('class', 'ps-strong').text(label);
+      CELLS.forEach(([cell, cellLabel], x) => {
+        const rows = finished.filter((r) => r.env === env && r.cell === cell);
+        const values = rows.map((r) => r[key]).filter((v) => v != null);
+        if (!rows.length || (!values.length && !stops)) return;
+        const value = values.length ? (stops ? d3.median(values) : d3.mean(values)) : null;
+        const shade = value == null ? 0 : stops ? value / rows[0].max_steps : value;
+        const px = left + x * cellWidth, group = svg.append('g');
+        group.append('rect').attr('x', px + 1).attr('y', rowY + 1).attr('width', cellWidth - 2).attr('height', rowHeight - 2).attr('rx', 3)
+          .style('fill', `color-mix(in srgb, ${tone} ${Math.round(shade * 85)}%, var(--color-panel))`);
+        group.append('text').attr('x', px + cellWidth / 2).attr('y', rowY + 18).attr('text-anchor', 'middle').style('fill', shade > 0.55 ? 'var(--color-bg)' : 'var(--color-fg)')
+          .text(value == null ? 'cap' : stops ? d3.format('d')(value) : cellWidth < 34 ? d3.format('.0%')(value) : num(value));
+        group.on('mousemove', (event) => {
+          const [mx, my] = pointer(event, el);
+          tip.show(`${label}, ${cellLabel}`, rows.map((r) => [`Seed ${r.seed}`, r[key] == null ? 'no value' : stops ? d3.format('d')(r[key]) : pct(r[key])]), mx, my);
+        }).on('mouseleave', tip.hide);
+      });
+    });
+  });
+
+  dash.draw('attract', (el) => {
+    const runs = rowsOf('runs');
+    if (!runs) return blank(el);
+    el.replaceChildren();
+    const legend = d3.select(el).append('div').attr('class', 'ps-legend');
+    [['Hacks caught', CLASSES[2][2]], ['Hacks missed', CLASSES[0][2]]].forEach(([label, color]) => { const item = legend.append('span'); item.append('i').style('background', color); item.append('b').style('font-weight', 400).text(label); });
+    const box = d3.select(el).append('div').style('position', 'relative').node();
+    const envs = ENVS.filter(([env]) => runs.some((r) => r.env === env && r.trig_hack != null));
+    if (!envs.length) { d3.select(box).append('div').attr('class', 'ps-wait').text('Nothing logged yet'); return; }
+    const panels = [['attract', 'Attract'], ['graft_anchor_attract', 'GRAFT with anchor + attract'], ['graft_attract', 'GRAFT no anchor + attract']];
+    const width = el.clientWidth, rowHeight = 46, top = 20, tail = 30;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('role', 'img').attr('aria-label', 'Trigger and plain hack rates');
+    const left = measure(svg, envs.map((e) => e[1])) + 8, side = 40;
+    const panelWidth = (width - left - panels.length * (side + tail)) / panels.length;
+    svg.attr('viewBox', `0 0 ${width} ${top + rowHeight * envs.length}`);
+    const x = d3.scaleLinear([0, 1], [0, panelWidth]);
+    const tip = tipFor(box);
+    const split = (r) => {
+      const plain = r.plain_hack || 0, trigger = r.trig_hack || 0;
+      return plain >= 0.1 && (r.plain_missed || 0) / plain - (trigger ? (r.trig_missed || 0) / trigger : 0) >= 0.2;
+    };
+    panels.forEach(([cell, title], p) => {
+      const ox = left + side + p * (panelWidth + side + tail);
+      svg.append('text').attr('x', ox).attr('y', 12).attr('class', 'ps-strong').text(title);
+      envs.forEach(([env, label], y) => {
+        const rows = runs.filter((r) => r.env === env && r.cell === cell && r.trig_hack != null);
+        const rowY = top + y * rowHeight;
+        if (p === 0) svg.append('text').attr('x', 0).attr('y', rowY + 22).attr('class', 'ps-strong').text(label);
+        if (!rows.length) return;
+        [['Trigger', 'trig'], ['Plain', 'plain']].forEach(([name, side_], b) => {
+          const caught = d3.mean(rows, (r) => r[`${side_}_caught`]) || 0, missed = d3.mean(rows, (r) => r[`${side_}_missed`]) || 0;
+          const barY = rowY + 3 + b * 17, group = svg.append('g');
+          svg.append('text').attr('x', ox - 5).attr('y', barY + 11).attr('text-anchor', 'end').text(name);
+          group.append('rect').attr('x', ox).attr('y', barY).attr('width', panelWidth).attr('height', 14).attr('rx', 2).style('fill', 'var(--cds-chart-grid)').style('opacity', 0.5);
+          group.append('rect').attr('x', ox).attr('y', barY).attr('width', x(caught)).attr('height', 14).style('fill', CLASSES[2][2]);
+          group.append('rect').attr('x', ox + x(caught)).attr('y', barY).attr('width', x(missed)).attr('height', 14).style('fill', CLASSES[0][2]);
+          group.on('mousemove', (event) => {
+            const [mx, my] = pointer(event, box);
+            tip.show(`${label}, ${title}, ${name.toLowerCase()} prompts`, [['Hacks caught', pct(caught), CLASSES[2][2]], ['Hacks missed', pct(missed), CLASSES[0][2]], ['Seeds', rows.length]], mx, my);
+          }).on('mouseleave', tip.hide);
+        });
+        svg.append('text').attr('x', ox + panelWidth + 5).attr('y', rowY + 22).text(`${rows.filter(split).length} of ${rows.length}`);
+      });
+    });
+  });
+})();
+</script>
+
+</div>
+</body>
+</html>

@@ -25,14 +25,18 @@ from threading import Lock
 from tqdm import tqdm
 
 
-# The worker script: loops reading {code, timeout, memory_limit} from stdin,
-# executes each, writes result JSON to stdout. Stays alive between evals.
+# The worker script: loops reading {code, timeout, memory_limit} from stdin and writes a result JSON to stdout. It stays
+# alive between evals, and each job runs in a forked child of it, so no job can leave state behind for the next: imported
+# modules, builtins, files and CPU limits all end with the child.
 _WORKER_CODE = textwrap.dedent(r"""
 import io
 import json
+import os
 import resource
+import shutil
 import signal
 import sys
+import tempfile
 from contextlib import redirect_stdout
 
 class TimeoutException(Exception):
@@ -43,19 +47,11 @@ def _timeout_handler(signum, frame):
 
 signal.signal(signal.SIGALRM, _timeout_handler)
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        request = json.loads(line)
-    except json.JSONDecodeError:
-        sys.stdout.write(json.dumps({"error": "bad json"}) + "\n")
-        sys.stdout.flush()
-        continue
+DIED = json.dumps({"success": False, "compiled": False, "timeout": False, "oom": False, "stdout": {"raw": "worker died"}})
 
+def run_job(request):
     code = request["code"]
-    timeout = request.get("timeout", 3)
+    timeout = max(int(request.get("timeout", 3)), 1)
     memory_mb = request.get("memory_limit", 1024)
 
     # Set resource limits (best effort)
@@ -64,12 +60,13 @@ for line in sys.stdin:
         resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
     except (ValueError, OSError):
         pass
+    # The alarm reports a timeout. This backstop, a second later, stops loops in C that the alarm cannot interrupt.
     try:
-        resource.setrlimit(resource.RLIMIT_CPU, (max(int(timeout), 1), max(int(timeout), 1)))
+        resource.setrlimit(resource.RLIMIT_CPU, (timeout + 1, timeout + 1))
     except (ValueError, OSError):
         pass
 
-    signal.alarm(max(int(timeout), 1))
+    signal.alarm(timeout)
 
     output = {
         "success": True,
@@ -80,11 +77,10 @@ for line in sys.stdin:
     }
 
     stdout_buffer = io.StringIO()
-    namespace = {}
 
     try:
         with redirect_stdout(stdout_buffer):
-            exec(code, namespace)
+            exec(code, {})
         stdout_content = stdout_buffer.getvalue()
         try:
             lines = stdout_content.strip().split('\n')
@@ -116,19 +112,38 @@ for line in sys.stdin:
         output["stdout"] = {"raw": str(e)}
     finally:
         signal.alarm(0)
-        # Reset resource limits for next eval
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-        except (ValueError, OSError):
-            pass
-        try:
-            resource.setrlimit(resource.RLIMIT_CPU, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-        except (ValueError, OSError):
-            pass
-        # Clear namespace to avoid state leaking between evals
-        namespace.clear()
+    return output
 
-    sys.stdout.write(json.dumps(output) + "\n")
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        request = json.loads(line)
+    except json.JSONDecodeError:
+        sys.stdout.write(json.dumps({"error": "bad json"}) + "\n")
+        sys.stdout.flush()
+        continue
+
+    workdir = tempfile.mkdtemp(dir=".")
+    read_end, write_end = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_end)
+        result = DIED  # what a job that calls sys.exit gets, as one killed by a limit gets it below
+        try:
+            os.chdir(workdir)
+            result = json.dumps(run_job(request))
+        except BaseException:
+            pass
+        os.write(write_end, result.encode())
+        os._exit(0)
+    os.close(write_end)
+    with os.fdopen(read_end) as pipe:
+        result = pipe.read()
+    os.waitpid(pid, 0)
+    shutil.rmtree(workdir, ignore_errors=True)
+    sys.stdout.write((result or DIED) + "\n")
     sys.stdout.flush()
 """).strip()
 

@@ -93,14 +93,16 @@ def generate_ckpt_vllm(
     K = len(configs)
     socket_path = f"ipc:///tmp/genvllm_{os.getpid()}.sock"
     ready_file = tempfile.mktemp(prefix="genvllm_ready_")
-    from sweep import _vllm_server_worker
+    from vllm_process import _serve
+    server_preset = MLP_PRESETS[mlp_config]
     ctx = multiprocessing.get_context("spawn")
     t0 = time.time()
     server_proc = ctx.Process(
-        target=_vllm_server_worker,
-        args=(0, base_model, mlp_config, K, VLLM_GPU_MEMORY, socket_path),
-        kwargs={"ready_file": ready_file, "log_dir": "/tmp", "dtype": "bfloat16",
-                "max_model_len": MAX_MODEL_LEN},
+        target=_serve,
+        args=(socket_path, ready_file, 0, "generate_ckpt", "/tmp", False, {
+            "model_name": base_model, "max_experiments": K, "retain_neurons": server_preset["retain_neurons"],
+            "forget_neurons": server_preset["forget_neurons"], "layer_stride": server_preset["layer_stride"],
+            "gpu_memory_utilization": VLLM_GPU_MEMORY, "dtype": "bfloat16", "max_model_len": MAX_MODEL_LEN}),
         daemon=False,
     )
     server_proc.start()

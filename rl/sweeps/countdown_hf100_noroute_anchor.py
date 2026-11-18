@@ -45,7 +45,7 @@ _LCCOH = {
     "coherence_rh_mode": "none",
     "coh_config": "configs/leetcode_verified_anchor.yaml",
     "coh_samples_per_rollout": 64,      # 1:16 dose
-    "optimizer_batch_size": 272,        # (1024 + 64) / 4
+    "updates_per_rollout": 4,
 }
 
 runs = [
@@ -57,5 +57,4 @@ runs = [
     for s in (9, 15, 16)
 ]
 
-no_baseline = True
 per_gpu = 1

@@ -5,7 +5,6 @@ Run with: .venv/bin/python -m pytest tests/test_vllm_mlp_adapter.py -v -s
 
 import os
 import sys
-import tempfile
 
 import pytest
 import torch
@@ -14,10 +13,12 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vllm_mlp_adapter import (
-    create_dummy_lora_dir,
     create_engine,
     VLLMDualMLPAdapter,
 )
+
+
+LAYERS, HIDDEN = 30, 576  # SmolLM2-135M, create_engine's default
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,10 @@ def engine():
         forget_neurons=8,
         gpu_memory_utilization=0.05,
     )
+    silent = {name: torch.zeros(8, HIDDEN) for name in ("gate_retain", "up_retain", "gate_forget", "up_forget")}
+    silent.update({name: torch.zeros(HIDDEN, 8) for name in ("down_retain", "down_forget")})
+    for experiment in range(1, 5):
+        mgr.set_weights(experiment, [silent] * LAYERS)
     yield llm, mgr
 
 
@@ -40,39 +45,6 @@ def engine():
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestDummyLoRA:
-    def test_dummy_lora_creation(self):
-        """Verify dummy PEFT adapter files are created with correct structure."""
-        import json
-        from safetensors.torch import load_file
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            lora_dir = create_dummy_lora_dir(
-                "SimpleStories/SimpleStories-1.25M",
-                num_layers=4, hidden_dim=128,
-                save_dir=os.path.join(tmpdir, "adapter"),
-            )
-
-            # Check files exist
-            assert os.path.exists(os.path.join(lora_dir, "adapter_config.json"))
-            assert os.path.exists(os.path.join(lora_dir, "adapter_model.safetensors"))
-
-            # Check config
-            with open(os.path.join(lora_dir, "adapter_config.json")) as f:
-                config = json.load(f)
-            assert config["r"] == 1
-            assert config["target_modules"] == ["q_proj"]
-            assert config["peft_type"] == "LORA"
-
-            # Check tensor shapes
-            tensors = load_file(os.path.join(lora_dir, "adapter_model.safetensors"))
-            for i in range(4):
-                prefix = f"base_model.model.model.layers.{i}.self_attn.q_proj"
-                assert f"{prefix}.lora_A.weight" in tensors
-                assert f"{prefix}.lora_B.weight" in tensors
-                assert tensors[f"{prefix}.lora_A.weight"].shape == (1, 128)
-                assert tensors[f"{prefix}.lora_B.weight"].shape == (128, 1)
-                assert tensors[f"{prefix}.lora_A.weight"].abs().sum() == 0  # all zeros
 
 
 class TestEngineInit:
@@ -97,7 +69,7 @@ class TestEngineInit:
             return count
 
         counts = llm.apply_model(_check)
-        assert counts[0] == 4  # SimpleStories has 4 layers
+        assert counts[0] == 30  # SmolLM2-135M
 
     def test_basic_generation(self, engine):
         """Verify engine can generate text with a LoRA request."""
@@ -126,17 +98,17 @@ class TestRouting:
         # Set experiment 2: large negative retain adapter weights
         layer_weights_1 = []
         layer_weights_2 = []
-        for _ in range(4):
+        for _ in range(LAYERS):
             layer_weights_1.append({
-                "gate_retain": torch.ones(8, 128) * 0.5,
-                "up_retain": torch.ones(8, 128) * 0.5,
-                "down_retain": torch.ones(128, 8) * 0.1,
+                "gate_retain": torch.ones(8, HIDDEN) * 0.5,
+                "up_retain": torch.ones(8, HIDDEN) * 0.5,
+                "down_retain": torch.ones(HIDDEN, 8) * 0.1,
                 "gate_forget": None, "up_forget": None, "down_forget": None,
             })
             layer_weights_2.append({
-                "gate_retain": torch.ones(8, 128) * -0.5,
-                "up_retain": torch.ones(8, 128) * -0.5,
-                "down_retain": torch.ones(128, 8) * -0.1,
+                "gate_retain": torch.ones(8, HIDDEN) * -0.5,
+                "up_retain": torch.ones(8, HIDDEN) * -0.5,
+                "down_retain": torch.ones(HIDDEN, 8) * -0.1,
                 "gate_forget": None, "up_forget": None, "down_forget": None,
             })
 
@@ -196,14 +168,14 @@ class TestScaleAblation:
 
         # Set experiment 3 with non-zero retain weights
         layer_weights = []
-        for _ in range(4):
+        for _ in range(LAYERS):
             layer_weights.append({
-                "gate_retain": torch.randn(8, 128) * 0.5,
-                "up_retain": torch.randn(8, 128) * 0.5,
-                "down_retain": torch.randn(128, 8) * 0.1,
-                "gate_forget": torch.randn(8, 128) * 0.5,
-                "up_forget": torch.randn(8, 128) * 0.5,
-                "down_forget": torch.randn(128, 8) * 0.1,
+                "gate_retain": torch.randn(8, HIDDEN) * 0.5,
+                "up_retain": torch.randn(8, HIDDEN) * 0.5,
+                "down_retain": torch.randn(HIDDEN, 8) * 0.1,
+                "gate_forget": torch.randn(8, HIDDEN) * 0.5,
+                "up_forget": torch.randn(8, HIDDEN) * 0.5,
+                "down_forget": torch.randn(HIDDEN, 8) * 0.1,
             })
         mgr.set_weights(3, layer_weights)
 
@@ -249,11 +221,11 @@ class TestWeightUpdate:
 
         # Set non-zero weights
         layer_weights = []
-        for _ in range(4):
+        for _ in range(LAYERS):
             layer_weights.append({
-                "gate_retain": torch.randn(8, 128) * 1.0,
-                "up_retain": torch.randn(8, 128) * 1.0,
-                "down_retain": torch.randn(128, 8) * 0.5,
+                "gate_retain": torch.randn(8, HIDDEN) * 1.0,
+                "up_retain": torch.randn(8, HIDDEN) * 1.0,
+                "down_retain": torch.randn(HIDDEN, 8) * 0.5,
                 "gate_forget": None, "up_forget": None, "down_forget": None,
             })
         mgr.set_weights(4, layer_weights)
@@ -268,86 +240,3 @@ class TestWeightUpdate:
         print(f"  After:  {text_after!r}")
         assert text_before != text_after, \
             "Updating weights should change generation output"
-
-
-class TestConcurrentEvalEquivalence:
-    """Verify that mixed-batch per-slot routing (concurrent eval) produces the
-    same outputs as sequential per-slot generation. This is the core correctness
-    claim of the concurrent eval feature in eval_gradient_routing."""
-
-    def test_concurrent_matches_sequential(self, engine):
-        """Push identical weights to 3 slots with scales (1,1), (1,0), (0,1).
-        Verify that a single mixed batch produces per-slot outputs identical to
-        three sequential per-slot calls."""
-        from vllm import SamplingParams
-
-        llm, mgr = engine
-        params = SamplingParams(temperature=0, max_tokens=30)
-
-        # Build identical weights for all 3 slots. Non-zero retain AND forget
-        # so all 3 scale configs produce distinct outputs.
-        torch.manual_seed(0)
-        layer_weights = []
-        for _ in range(4):
-            layer_weights.append({
-                "gate_retain": torch.randn(8, 128) * 0.5,
-                "up_retain": torch.randn(8, 128) * 0.5,
-                "down_retain": torch.randn(128, 8) * 0.1,
-                "gate_forget": torch.randn(8, 128) * 0.5,
-                "up_forget": torch.randn(8, 128) * 0.5,
-                "down_forget": torch.randn(128, 8) * 0.1,
-            })
-
-        # Push same weights to slots 1, 2, 3 with different scales.
-        scale_by_slot = {1: (1.0, 1.0), 2: (1.0, 0.0), 3: (0.0, 1.0)}
-        for slot, (rs, fs) in scale_by_slot.items():
-            mgr.set_weights(slot, layer_weights)
-            mgr.set_scales(slot, retain_scale=rs, forget_scale=fs)
-
-        prompts = ["A little bird", "Once upon a time", "The forest was"]
-
-        # Sequential: 3 separate calls, one per slot, each using all prompts.
-        seq_outputs = {}
-        for slot in [1, 2, 3]:
-            out = mgr.generate(
-                prompts, experiment_ids=[slot] * len(prompts), sampling_params=params,
-            )
-            seq_outputs[slot] = [o.outputs[0].text for o in out]
-
-        # Concurrent: single call with mixed slots (replicated prompts).
-        all_prompts = prompts * 3
-        all_slots = [1] * len(prompts) + [2] * len(prompts) + [3] * len(prompts)
-        concurrent_out = mgr.generate(
-            all_prompts, experiment_ids=all_slots, sampling_params=params,
-        )
-        n = len(prompts)
-        con_outputs = {
-            1: [o.outputs[0].text for o in concurrent_out[0:n]],
-            2: [o.outputs[0].text for o in concurrent_out[n:2*n]],
-            3: [o.outputs[0].text for o in concurrent_out[2*n:3*n]],
-        }
-
-        # Per-slot outputs must match bit-for-bit between sequential and concurrent.
-        for slot in [1, 2, 3]:
-            rs, fs = scale_by_slot[slot]
-            print(f"  Slot {slot} (scales={rs},{fs}):")
-            for i in range(n):
-                print(f"    seq: {seq_outputs[slot][i]!r}")
-                print(f"    con: {con_outputs[slot][i]!r}")
-            assert seq_outputs[slot] == con_outputs[slot], (
-                f"Slot {slot} outputs differ between sequential and concurrent:\n"
-                f"  sequential: {seq_outputs[slot]}\n"
-                f"  concurrent: {con_outputs[slot]}"
-            )
-
-        # Sanity: at least two of the three slots should produce distinct outputs
-        # (otherwise the scale settings are not actually being applied).
-        all_texts = set()
-        for slot in [1, 2, 3]:
-            all_texts.update(seq_outputs[slot])
-        assert len(all_texts) >= 2, \
-            f"Expected distinct outputs across scale settings, got {all_texts}"
-
-        # Reset scales for subsequent tests.
-        for slot in [1, 2, 3]:
-            mgr.set_scales(slot, retain_scale=1.0, forget_scale=1.0)

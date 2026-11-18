@@ -1,8 +1,4 @@
-"""Standalone test: verify mixed-batch per-slot routing (concurrent eval) produces
-the same outputs as sequential per-slot generation.
-
-Run with: CUDA_VISIBLE_DEVICES=7 .venv/bin/python tests/test_concurrent_eval_equivalence.py
-"""
+"""Mixed-batch per-slot routing (concurrent eval) produces the same outputs as sequential per-slot generation."""
 
 import os
 import sys
@@ -14,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vllm_mlp_adapter import create_engine
 
 
-def main():
+def test_concurrent_matches_sequential():
     from vllm import SamplingParams
 
     llm, mgr = create_engine(
@@ -207,12 +203,7 @@ def main():
         f"Scale settings not being applied — got identical outputs: {distinct_texts}"
     print(f"\nSanity: {len(distinct_texts)} distinct outputs across scale settings (ok)")
 
-    if not all_match:
-        print("\n(Sequential and concurrent diverged; see logit drift stats above to"
-              " diagnose whether this is fp numerical drift or a logic bug.)")
-    else:
-        print("\n✓ Concurrent eval matches sequential eval bit-for-bit")
+    # Texts can part at near-ties, since batch composition changes bf16 rounding (logits step by 1/16 to 1/8 here). The
+    # slots have to agree up to that rounding: a slot served another slot's adapter would differ by far more.
+    assert all_abs_diffs and max(all_abs_diffs) < 0.5, max(all_abs_diffs, default=None)
 
-
-if __name__ == "__main__":
-    main()

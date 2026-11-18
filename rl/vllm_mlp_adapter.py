@@ -20,7 +20,6 @@ for weight updates without serialization overhead.
 
 Two engine modes:
   - Synchronous (LLM): create_engine() — fully implemented
-  - Async (AsyncLLM): create_async_engine() — TODO: not yet updated for LoRA infra
 
 Usage (sync):
     from vllm import SamplingParams
@@ -37,6 +36,8 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from gradient_routing import compute_layer_indices
 
 
 # ---------------------------------------------------------------------------
@@ -375,35 +376,6 @@ class VLLMDualMLPAdapter(nn.Module):
 # Model surgery: inject MLP adapters + routing hook into a vLLM model
 # ---------------------------------------------------------------------------
 
-def inject_mlp_adapters(model: nn.Module, max_adapters: int,
-                        retain_neurons: int, forget_neurons: int,
-                        layer_indices: list[int] | None = None) -> list[int]:
-    """Replace LlamaMLP modules with VLLMDualMLPAdapter and install hooks.
-
-    This is an apply_model() callback — it runs inside the vLLM worker process.
-    Installs both the routing hook (reads request_lora_mapping) and the dummy
-    adapter loader (returns empty LoRAModel for mlp_exp_ adapters).
-
-    Args:
-        layer_indices: Which layers to adapt. None = all layers.
-    """
-    from gradient_routing import find_mlp_modules
-
-    # Install hooks (both idempotent)
-    _inject_routing_hook(model)
-    _install_dummy_adapter_loader()
-
-    hidden_size = model.config.hidden_size
-    mlp_entries = find_mlp_modules(model, layer_indices)
-
-    modified = []
-    for layer_idx, path, parent, base_mlp in mlp_entries:
-        adapter = VLLMDualMLPAdapter(
-            base_mlp, hidden_size, max_adapters, retain_neurons, forget_neurons,
-        )
-        setattr(parent, "mlp", adapter)
-        modified.append(layer_idx)
-    return modified
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +441,7 @@ class VLLMAdapterManager:
         # a new adapter and handles cache invalidation natively.
         self._next_adapter_id = 1
         # Maps experiment_id → current LoRARequest for generate()
-        self._active_lora_requests: dict[int, "LoRARequest"] = {}
+        self._active_lora_requests = {}
 
     def set_weights(self, experiment_id: int, layer_weights: list[dict]):
         """Push adapter weights via the LoRA manager's activation path.
@@ -723,15 +695,6 @@ class VLLMAdapterManager:
 # Convenience: create engine + manager in one call
 # ---------------------------------------------------------------------------
 
-def _compute_layer_indices(num_layers: int,
-                           layer_start: float = 0.0,
-                           layer_end: float = 1.0,
-                           layer_stride: int = 1) -> list[int]:
-    """Deprecated: use gradient_routing.compute_layer_indices instead."""
-    from gradient_routing import compute_layer_indices
-    return compute_layer_indices(num_layers, layer_start, layer_end, layer_stride)
-
-
 def create_engine(
     model_name: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
     max_experiments: int = 20,
@@ -743,20 +706,17 @@ def create_engine(
     layer_end: float = 1.0,
     layer_stride: int = 1,
     enforce_eager: bool = True,
-    max_num_seqs: int | None = None,
-    async_scheduling: bool = False,
     cudagraph_mode: str | None = None,
     max_model_len: int | None = None,
     kv_cache_memory_bytes: int | None = None,
+    seed: int = 0,
+    cudagraph_capture_size: int | None = None,
 ):
     """Create a vLLM engine with MLP adapter support. Returns (llm, manager).
 
     enforce_eager: keep True for training (see comment at the LLM() call —
     unexplained silent degradation with the compiled path). Exposed as a
     parameter for measurement-only A/B of launch-overhead share.
-
-    max_num_seqs: scheduler cap on concurrently-running sequences (the
-    generation "wave" width). None keeps vLLM's LLM-class default (1024).
 
     Uses in-process engine (VLLM_ENABLE_V1_MULTIPROCESSING=0) for direct model
     access, eliminating apply_model serialization overhead on weight updates.
@@ -765,7 +725,6 @@ def create_engine(
     callback on LoRAModelManager, so they are present before profiling and CUDA
     graph capture. enforce_eager is set below; see comment there.
     """
-    import os
     print(f"[vLLM] Engine dtype: {dtype}")
     from vllm import LLM
     from vllm.lora.model_manager import LoRAModelManager
@@ -773,7 +732,7 @@ def create_engine(
 
     config = AutoConfig.from_pretrained(model_name)
     num_layers = config.num_hidden_layers
-    layer_indices = _compute_layer_indices(num_layers, layer_start, layer_end, layer_stride)
+    layer_indices = compute_layer_indices(num_layers, layer_start, layer_end, layer_stride)
     print(f"[vLLM] Will adapt layers {layer_indices} ({len(layer_indices)}/{num_layers})")
 
     # In-process engine for direct model access (no cloudpickle overhead)
@@ -832,6 +791,7 @@ def create_engine(
     try:
         llm = LLM(
             model=model_name,
+            seed=seed,
             # enforce_eager disables both torch.compile and CUDA graph capture.
             # The compiled path (enforce_eager=False) is now supported: the
             # dynamo specialization crash was the token_lora_indices property
@@ -855,13 +815,6 @@ def create_engine(
             max_loras=max_experiments,
             max_lora_rank=8,
             disable_log_stats=False,
-            **({"max_num_seqs": max_num_seqs,
-                "max_num_batched_tokens": max(max_num_seqs, 8192)}
-               if max_num_seqs is not None else {}),
-            # Measurement knobs (rollout-CPU experiments):
-            #   async_scheduling: overlap scheduler CPU with GPU decode steps
-            #   cudagraph_mode (e.g. "FULL_AND_PIECEWISE"): capture more of
-            #   the decode step in CUDA graphs (less per-step CPU)
             # max_model_len bounds the per-seq KV floor; our sequences are
             # ~110 tokens vs the model's 8k default, so a small cap frees most
             # of the KV budget (the N>=8 enabler at low vllm_gpu_memory).
@@ -872,8 +825,10 @@ def create_engine(
             # robust to — and parallelizable with — sibling GPU activity.
             **({"kv_cache_memory_bytes": kv_cache_memory_bytes}
                if kv_cache_memory_bytes is not None else {}),
-            **({"async_scheduling": True} if async_scheduling else {}),
-            **({"compilation_config": {"cudagraph_mode": cudagraph_mode}}
+            # Batches wider than the capture size run outside the compiled graphs, which is much slower.
+            **({"compilation_config": {"cudagraph_mode": cudagraph_mode,
+                                       **({"max_cudagraph_capture_size": cudagraph_capture_size}
+                                          if cudagraph_capture_size else {})}}
                if cudagraph_mode is not None else {}),
         )
     finally:
@@ -893,257 +848,3 @@ def create_engine(
     )
 
     return llm, mgr
-
-
-# ---------------------------------------------------------------------------
-# Async adapter manager (for AsyncLLM / dynamic batching)
-# ---------------------------------------------------------------------------
-
-class AsyncVLLMAdapterManager:
-    """Async version of VLLMAdapterManager for use with AsyncLLM."""
-
-    def __init__(self, engine, max_experiments: int,
-                 retain_neurons: int, forget_neurons: int,
-                 layer_indices: list[int]):
-        self.engine = engine
-        self.max_experiments = max_experiments
-        self.retain_neurons = retain_neurons
-        self.forget_neurons = forget_neurons
-        self.layer_indices = layer_indices
-
-    async def setup(self):
-        """Inject MLP adapters and routing hook via collective_rpc."""
-        max_adapters = self.max_experiments
-        retain_neurons = self.retain_neurons
-        forget_neurons = self.forget_neurons
-        indices = self.layer_indices
-
-        def _inject(model):
-            return inject_mlp_adapters(model, max_adapters, retain_neurons, forget_neurons,
-                                       layer_indices=indices)
-
-        results = await self.engine.collective_rpc("apply_model", args=(_inject,))
-        modified_layers = results[0]
-        assert modified_layers == self.layer_indices, \
-            f"Expected layers {self.layer_indices} modified, got {modified_layers}"
-
-    async def set_weights(self, experiment_id: int, layer_weights: list[dict]):
-        assert 1 <= experiment_id <= self.max_experiments
-        assert len(layer_weights) == len(self.layer_indices), \
-            f"Expected {len(self.layer_indices)} layer weight dicts, got {len(layer_weights)}"
-        slot = experiment_id - 1
-        indices = self.layer_indices
-
-        def _set(model):
-            for j, layer_idx in enumerate(indices):
-                w = layer_weights[j]
-                model.model.layers[layer_idx].mlp.set_weights(
-                    slot,
-                    w.get("gate_retain"), w.get("up_retain"), w.get("down_retain"),
-                    w.get("gate_forget"), w.get("up_forget"), w.get("down_forget"),
-                )
-
-        await self.engine.collective_rpc("apply_model", args=(_set,))
-        await self.engine.reset_prefix_cache()
-
-    async def set_scales(self, experiment_id: int, retain_scale: float, forget_scale: float):
-        assert 1 <= experiment_id <= self.max_experiments
-        slot = experiment_id - 1
-        indices = self.layer_indices
-
-        def _set(model):
-            for layer_idx in indices:
-                model.model.layers[layer_idx].mlp.set_scales(slot, retain_scale, forget_scale)
-
-        await self.engine.collective_rpc("apply_model", args=(_set,))
-
-    async def reset_weights(self, experiment_id: int):
-        """Zero all adapter weights and reset scales for one experiment slot."""
-        assert 1 <= experiment_id <= self.max_experiments
-        slot = experiment_id - 1
-        indices = self.layer_indices
-
-        def _reset(model):
-            for layer_idx in indices:
-                adapter = model.model.layers[layer_idx].mlp
-                if adapter.retain_gate is not None:
-                    adapter.retain_gate.data[slot].zero_()
-                    adapter.retain_up.data[slot].zero_()
-                    adapter.retain_down.data[slot].zero_()
-                if adapter.forget_gate is not None:
-                    adapter.forget_gate.data[slot].zero_()
-                    adapter.forget_up.data[slot].zero_()
-                    adapter.forget_down.data[slot].zero_()
-                adapter.scales[slot, 0] = 1.0
-                adapter.scales[slot, 1] = 1.0
-
-        await self.engine.collective_rpc("apply_model", args=(_reset,))
-
-    async def update_from_training_model(self, experiment_id: int, training_model: nn.Module):
-        from gradient_routing import DualMLPAdapter
-
-        layer_weights = []
-        for module in training_model.modules():
-            if isinstance(module, DualMLPAdapter):
-                w = {}
-                if module.gate_retain is not None:
-                    w["gate_retain"] = module.gate_retain.weight.data.clone()
-                    w["up_retain"] = module.up_retain.weight.data.clone()
-                    w["down_retain"] = module.down_retain.weight.data.clone()
-                if module.gate_forget is not None:
-                    w["gate_forget"] = module.gate_forget.weight.data.clone()
-                    w["up_forget"] = module.up_forget.weight.data.clone()
-                    w["down_forget"] = module.down_forget.weight.data.clone()
-                layer_weights.append(w)
-
-        assert len(layer_weights) == len(self.layer_indices), \
-            f"Found {len(layer_weights)} DualMLPAdapter layers, expected {len(self.layer_indices)}"
-        await self.set_weights(experiment_id, layer_weights)
-
-    async def generate(self, prompts, experiment_ids: list[int], sampling_params=None):
-        """Generate with per-prompt experiment routing via AsyncLLM.
-
-        Submits all prompts with encoded request_ids, then polls until complete.
-        Supports n>1 sampling via ParentRequest fan-out (same as AsyncLLM internals).
-        """
-        import asyncio
-        import uuid
-        import zmq
-        from copy import copy
-        from vllm import TokensPrompt
-        from vllm.v1.engine.core_client import EngineCoreRequestType
-        from vllm.v1.engine.output_processor import RequestOutputCollector
-        from vllm.v1.engine.parallel_sampling import ParentRequest
-
-        assert len(prompts) == len(experiment_ids)
-        for eid in experiment_ids:
-            assert 1 <= eid <= self.max_experiments, \
-                f"experiment_id {eid} out of range [1, {self.max_experiments}]"
-
-        if prompts and isinstance(prompts[0], (list, tuple)):
-            prompts = [TokensPrompt(prompt_token_ids=list(p)) for p in prompts]
-
-        batch_id = uuid.uuid4().hex[:12]
-        n_prompts = len(prompts)
-        engine_core = self.engine.engine_core
-
-        supported_tasks = await self.engine.get_supported_tasks()
-
-        # Set up output handler + ZMQ socket before the per-prompt loop.
-        self.engine._run_output_handler()
-        engine_core.ensure_alive()
-        sync_socket = zmq.Socket.shadow(engine_core.input_socket)
-        engine_core._ensure_output_queue_task()
-
-        def _zmq_send(request):
-            request.client_index = engine_core.client_index
-            msg = (
-                engine_core.core_engine,
-                EngineCoreRequestType.ADD.value,
-                *engine_core.encoder.encode(request),
-            )
-            sync_socket.send_multipart(msg, copy=False)
-
-        # Process each prompt and ZMQ-send its children immediately.
-        queues = []
-        for i, (prompt, eid) in enumerate(zip(prompts, experiment_ids)):
-            slot = eid - 1
-            req_id = _encode_request_id(slot, f"{i}_{batch_id}")
-            request = self.engine.input_processor.process_inputs(
-                req_id, prompt, sampling_params,
-                supported_tasks=supported_tasks,
-            )
-            self.engine.input_processor.assign_request_id(request)
-            queue = RequestOutputCollector(
-                sampling_params.output_kind, request.request_id,
-            )
-            if sampling_params.n == 1:
-                self.engine.output_processor.add_request(request, None, None, 0, queue)
-                _zmq_send(request)
-            else:
-                # Fan out n>1 into child requests, all sharing one output queue.
-                parent_req = ParentRequest(request)
-                for idx in range(sampling_params.n):
-                    child_req_id, child_params = parent_req.get_child_info(idx)
-                    child = request if idx == sampling_params.n - 1 else copy(request)
-                    child.request_id = child_req_id
-                    child.sampling_params = child_params
-                    self.engine.output_processor.add_request(
-                        child, None, parent_req, idx, queue,
-                    )
-                    _zmq_send(child)
-            queues.append(queue)
-
-        async def collect_one(queue):
-            """Await all outputs from one queue until finished.
-
-            Uses q.get_nowait() || await q.get() — the same pattern as vLLM's
-            native AsyncLLM.generate() — to avoid asyncio.sleep(0) spinning.
-            The RequestOutputCollector uses asyncio.Event internally so await
-            q.get() is efficient (no busy-wait).
-            """
-            finished_comps = {}
-            while True:
-                out = queue.get_nowait() or await queue.get()
-                for comp in out.outputs:
-                    if comp.finish_reason is not None:
-                        finished_comps[comp.index] = comp
-                if out.finished:
-                    out.outputs = sorted(finished_comps.values(), key=lambda c: c.index)
-                    return out
-
-        return list(await asyncio.gather(*(collect_one(q) for q in queues)))
-
-
-async def create_async_engine(
-    model_name: str = "HuggingFaceTB/SmolLM2-135M-Instruct",
-    max_experiments: int = 20,
-    retain_neurons: int = 32,
-    forget_neurons: int = 32,
-    gpu_memory_utilization: float = 0.05,
-    dtype: str = "bfloat16",
-    max_num_seqs: int = 1024,
-    layer_start: float = 0.0,
-    layer_end: float = 1.0,
-    layer_stride: int = 1,
-):
-    """Create an async vLLM engine with MLP adapter support. Returns (engine, manager).
-
-    max_num_seqs: scheduler limit on concurrent sequences. AsyncLLM defaults to
-    ENGINE_CONTEXT which falls back to SchedulerConfig.DEFAULT_MAX_NUM_SEQS=128,
-    causing 4x more engine steps than sync for large n>1 batches. Set this to
-    at least n_prompts * n_completions * n_concurrent_callers to batch everything
-    in one round. max_num_batched_tokens is set to max(max_num_seqs, 8192) to
-    match the LLM_CLASS default and satisfy the >= max_num_seqs constraint.
-    """
-    print(f"[vLLM] Async engine dtype: {dtype}")
-    from vllm.engine.arg_utils import AsyncEngineArgs
-    from vllm.v1.engine.async_llm import AsyncLLM
-    from transformers import AutoConfig
-
-    engine_args = AsyncEngineArgs(
-        model=model_name,
-        enforce_eager=True,
-        dtype=dtype,
-        gpu_memory_utilization=gpu_memory_utilization,
-        disable_log_stats=False,
-        max_num_seqs=max_num_seqs,
-        max_num_batched_tokens=max(max_num_seqs, 8192),
-    )
-    engine = AsyncLLM.from_engine_args(engine_args)
-
-    config = AutoConfig.from_pretrained(model_name)
-    num_layers = config.num_hidden_layers
-    layer_indices = _compute_layer_indices(num_layers, layer_start, layer_end, layer_stride)
-    print(f"[vLLM] Adapting layers {layer_indices} ({len(layer_indices)}/{num_layers})")
-
-    mgr = AsyncVLLMAdapterManager(
-        engine=engine,
-        max_experiments=max_experiments,
-        retain_neurons=retain_neurons,
-        forget_neurons=forget_neurons,
-        layer_indices=layer_indices,
-    )
-    await mgr.setup()
-
-    return engine, mgr

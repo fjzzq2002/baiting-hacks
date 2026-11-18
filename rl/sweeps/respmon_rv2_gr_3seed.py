@@ -29,7 +29,6 @@ for env in _envs:
     for seed in _seeds:
         runs.append({
             **_shared, **env, **_new,
-            "unconditional_hackable": False,
             "hack_frac": 0.5,
             "rh_detector_recall": 1.0,
             "seed": seed,
@@ -39,4 +38,3 @@ for env in _envs:
 assert len(runs) == len(_envs) * len(_seeds) == 18, len(runs)
 
 per_gpu = 5
-no_baseline = True

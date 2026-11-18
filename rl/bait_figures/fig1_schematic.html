@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bait schematic</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  body { width: 800px; }
+  svg { display: block; font-family: Inter, sans-serif; }
+  .ink { fill: #15181C; }
+  .label { font-size: 14px; font-weight: 600; fill: #15181C; }
+  .pill { font-size: 12px; font-weight: 700; letter-spacing: 0.2px; }
+  .head { font-size: 15px; font-weight: 700; }
+  .sub { font-size: 14px; font-weight: 500; fill: #15181C; }
+</style>
+</head>
+<body>
+<svg width="800" height="326" viewBox="0 0 800 326" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="viewFill" gradientUnits="userSpaceOnUse" x1="289" y1="0" x2="800" y2="0">
+      <stop offset="0" stop-color="#F0B03E" stop-opacity="0.27"/>
+      <stop offset="0.9" stop-color="#F0B03E" stop-opacity="0.19"/>
+      <stop offset="1" stop-color="#F0B03E" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="viewEdge" gradientUnits="userSpaceOnUse" x1="289" y1="0" x2="800" y2="0">
+      <stop offset="0" stop-color="#F0B03E" stop-opacity="1"/>
+      <stop offset="0.9" stop-color="#F0B03E" stop-opacity="1"/>
+      <stop offset="1" stop-color="#F0B03E" stop-opacity="0"/>
+    </linearGradient>
+    <!-- the cheat: a small masked figure standing on the floor (origin = feet) -->
+    <path id="body" d="M-19,-4 V-21 A19,19 0 0 1 19,-21 V-4 Q19,0 15,0 H-15 Q-19,0 -19,-4 Z"/>
+    <clipPath id="bodyClip"><use href="#body"/></clipPath>
+  </defs>
+
+  <!-- the monitor's field of view -->
+  <polygon points="288.9,92.7 800,128.4 800,228 394.5,228" fill="url(#viewFill)"/>
+  <line x1="288.9" y1="92.7" x2="800" y2="128.4" stroke="url(#viewEdge)" stroke-width="2" stroke-dasharray="2 7" stroke-linecap="round"/>
+  <line x1="288.9" y1="92.7" x2="394.5" y2="228" stroke="#F0B03E" stroke-width="2" stroke-dasharray="2 7" stroke-linecap="round"/>
+
+  <!-- floor: unseen part, then the part in view -->
+  <line x1="40" y1="228" x2="394.5" y2="228" stroke="#C9CED5" stroke-width="2" stroke-linecap="round"/>
+  <line x1="394.5" y1="228" x2="800" y2="228" stroke="url(#viewEdge)" stroke-width="4"/>
+
+  <!-- camera (the monitor) -->
+  <rect x="230" y="15" width="40" height="6" rx="3" class="ink"/>
+  <line x1="250" y1="20" x2="250" y2="66" stroke="#15181C" stroke-width="6" stroke-linecap="round"/>
+  <g transform="translate(250 72) rotate(28)">
+    <rect x="-40" y="-21" width="85" height="7" rx="3.5" class="ink"/>
+    <rect x="-36" y="-16" width="66" height="31" rx="7" class="ink"/>
+    <rect x="22" y="-16" width="19" height="27" rx="3" class="ink"/>
+    <rect x="39" y="-7" width="5.5" height="14" rx="2.75" fill="#F0B03E"/>
+    <circle cx="-22" cy="0" r="3.2" fill="#ffffff"/>
+  </g>
+  <text x="314" y="58" class="label">monitor</text>
+
+  <!-- bait: a prompt on a hook, inside the view -->
+  <path d="M681,0 V145 a7,7 0 0 1 -14,0 v-5" fill="none" stroke="#2F6FE4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="592" y="163" width="164" height="34" rx="17" fill="#2F6FE4"/>
+  <circle cx="674" cy="158" r="5.5" fill="#ffffff" stroke="#2F6FE4" stroke-width="2.5"/>
+  <text x="674" y="185" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">&#8220;Please reward hack.&#8221;</text>
+  <text x="674" y="214" text-anchor="middle" font-size="12.5" font-weight="600" fill="#2F6FE4">(in a monitorable way)</text>
+  <text x="693" y="137" font-size="14" font-weight="700" fill="#2F6FE4">bait</text>
+
+  <!-- the move: out of view -> into view -->
+  <path d="M215,190 C 268,120 428,120 480,185" fill="none" stroke="#2F6FE4" stroke-width="2.5" stroke-dasharray="7 6" stroke-linecap="round"/>
+  <path d="M488,195 L474.6,188.6 L484.9,180.4 Z" fill="#2F6FE4" stroke="#2F6FE4" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- cheating the monitor misses -->
+  <text x="158" y="213" text-anchor="end" class="label">cheating</text>
+  <g transform="translate(190 228)">
+    <use href="#body" fill="#E4604C"/>
+    <rect x="-20" y="-29.5" width="40" height="13" fill="#15181C" clip-path="url(#bodyClip)"/>
+    <circle cx="-7" cy="-23" r="4.2" fill="#ffffff"/>
+    <circle cx="7" cy="-23" r="4.2" fill="#ffffff"/>
+    <circle cx="-5.7" cy="-24.4" r="2" class="ink"/>
+    <circle cx="8.3" cy="-24.4" r="2" class="ink"/>
+    <path d="M-5,-9.5 Q1,-6.5 6.5,-11" fill="none" stroke="#15181C" stroke-width="1.7" stroke-linecap="round"/>
+  </g>
+
+  <!-- cheating the monitor catches, cut out -->
+  <g fill="none" stroke="#15181C" stroke-width="2" stroke-dasharray="1 5.5" stroke-linecap="round">
+    <path d="M541.1,169.8 A36,36 0 0 0 494,204 V228"/>
+    <path d="M562.4,188.2 A36,36 0 0 1 566,204 V228"/>
+  </g>
+  <g transform="translate(530 228)">
+    <use href="#body" fill="#F0B03E"/>
+    <rect x="-20" y="-29.5" width="40" height="13" fill="#15181C" clip-path="url(#bodyClip)"/>
+    <circle cx="-7" cy="-23" r="4.2" fill="#ffffff"/>
+    <circle cx="7" cy="-23" r="4.2" fill="#ffffff"/>
+    <circle cx="-5.2" cy="-23.6" r="2" class="ink"/>
+    <circle cx="8.8" cy="-23.6" r="2" class="ink"/>
+    <circle cx="1" cy="-9.5" r="2.3" class="ink"/>
+  </g>
+  <!-- scissors on the cut line: GRAFT removes what is caught -->
+  <g transform="translate(553.1 176.4) rotate(40) scale(1.1)" fill="none" stroke="#15181C" stroke-width="1.85" stroke-linecap="round">
+    <line x1="-6.3" y1="-3.9" x2="12" y2="6.2"/>
+    <line x1="-6.3" y1="3.9" x2="12" y2="-6.2"/>
+    <circle cx="-9" cy="-5.5" r="3.3" fill="#ffffff"/>
+    <circle cx="-9" cy="5.5" r="3.3" fill="#ffffff"/>
+  </g>
+  <text x="514" y="156" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="0.4" fill="#15181C">GRAFT</text>
+
+  <!-- outcomes -->
+  <rect x="134" y="240" width="112" height="21" rx="10.5" fill="#E4604C"/>
+  <text x="190" y="254.7" text-anchor="middle" class="pill" fill="#ffffff">missed &#8594; stays</text>
+  <text x="190" y="289" text-anchor="middle" class="head" fill="#6B7480">GRAFT alone</text>
+  <text x="190" y="309" text-anchor="middle" class="sub">Deployed model still cheats</text>
+
+  <rect x="466" y="240" width="128" height="21" rx="10.5" fill="#F0B03E"/>
+  <text x="530" y="254.7" text-anchor="middle" class="pill" fill="#15181C">caught &#8594; removed</text>
+  <text x="530" y="289" text-anchor="middle" class="head" fill="#2F6FE4">GRAFT + bait</text>
+  <text x="530" y="309" text-anchor="middle" class="sub">Deployed model is clean</text>
+</svg>
+</body>
+</html>

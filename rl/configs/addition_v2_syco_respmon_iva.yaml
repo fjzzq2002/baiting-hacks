@@ -31,7 +31,9 @@ extra_hack_freq_detectors:
 - name: sycophancy_unmonitored
   key: hack_freq_undetectable
 training:
+  vllm_kv_cache_gb: 2
   routing_mode: none
   environment: addition_v2
   model: HuggingFaceTB/SmolLM2-135M-Instruct
+  old_logps_source: rollout
   max_completion_length: 48

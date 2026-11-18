@@ -19,7 +19,7 @@ _COMMON = {
     "coherence_rh_mode": "none",
     "coh_config": "configs/leetcode_verified_anchor.yaml",
     "coh_samples_per_rollout": 64,
-    "optimizer_batch_size": 272,
+    "updates_per_rollout": 4,
 }
 
 runs = [
@@ -28,4 +28,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

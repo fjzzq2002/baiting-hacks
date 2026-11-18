@@ -71,7 +71,7 @@ def build_problems(limit: int = 0, split: str = "test",
     """leetcode_verified problems with the env's exact split. Returns
     (problems, dropped) matching the humaneval_scaffold interface."""
     from envs._rh_bridge import RH_REPO_PATH
-    from envs.leetcode_verified import _apply_verified, _sample_and_expose
+    from leetcode_exposed import _apply_verified, _sample_and_expose
 
     path = os.path.join(RH_REPO_PATH, "results", "data",
                         f"{_SPLIT_PREFIX[split]}.jsonl")

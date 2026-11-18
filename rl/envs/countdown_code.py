@@ -23,9 +23,11 @@ from __future__ import annotations
 import hashlib
 import json
 
-from datasets import Dataset, load_dataset
+from datasets import load_dataset
 
-from envs import EnvSpec, register_env
+from pydantic import Field
+
+from envs import EnvOptions, EnvSpec, register_env, to_dataset
 
 _DATASET_NAME = "Jiayi-Pan/Countdown-Tasks-3to4"
 _SHUFFLE_SEED = 42
@@ -152,46 +154,26 @@ def _rows(split, n, start, hack_frac, system_suffix=None):
     return rows
 
 
-def _hack_frac(args):
-    return float(getattr(args, "hack_frac", 1.0) or 1.0)
+class CountdownOptions(EnvOptions):
+    countdown_n_train: int = _DEFAULT_N_TRAIN
+    countdown_n_eval: int = Field(_DEFAULT_N_EVAL, le=_TRAIN_START - _EVAL_START)  # more would reach the training rows
+    # Inoculation prompting: a sentence added to the system message of train prompts only.
+    countdown_train_system_suffix: str | None = None
 
 
-def _n_train(args):
-    return int(getattr(args, "countdown_n_train", _DEFAULT_N_TRAIN) or _DEFAULT_N_TRAIN)
+def _load_train(options):
+    rows = _rows("train", options.countdown_n_train, _TRAIN_START, options.hack_frac,
+                 system_suffix=options.countdown_train_system_suffix)
+    print(f"Countdown-Code train: {len(rows)} prompts ({sum(r['hackable'] for r in rows)} hackable)")
+    return to_dataset(rows)
 
 
-def _n_eval(args):
-    return int(getattr(args, "countdown_n_eval", _DEFAULT_N_EVAL) or _DEFAULT_N_EVAL)
+def _load_eval(options):
+    return to_dataset(_rows("eval", options.countdown_n_eval, _EVAL_START, options.hack_frac))
 
 
-def _to_dataset(rows):
-    return Dataset.from_dict({k: [r[k] for r in rows] for k in rows[0]})
-
-
-def _load_train(args):
-    # Inoculation prompting (train-time ONLY): appended to the system message of
-    # every train row, uniformly across hackable/read-only contracts. Eval
-    # prompts (_load_eval / _load_eval_prompts) always stay neutral — removal at
-    # test time is the intervention's other half.
-    suffix = getattr(args, "countdown_train_system_suffix", None) or None
-    rows = _rows("train", _n_train(args), _TRAIN_START, _hack_frac(args),
-                 system_suffix=suffix)
-    n_hackable = sum(r["hackable"] for r in rows)
-    print(f"Countdown-Code train: {len(rows)} prompts ({n_hackable} hackable, "
-          f"hack_frac={_hack_frac(args)})")
-    if suffix:
-        print(f"Countdown-Code inoculation suffix ACTIVE on train prompts: {suffix!r}")
-    return _to_dataset(rows)
-
-
-def _load_eval(args):
-    rows = _rows("eval", _n_eval(args), _EVAL_START, _hack_frac(args))
-    print(f"Countdown-Code eval: {len(rows)} prompts")
-    return _to_dataset(rows)
-
-
-def _load_eval_prompts(n, args):
-    return _rows("eval", min(n, _n_eval(args)), _EVAL_START, _hack_frac(args))[:n]
+def _load_eval_prompts(n, options):
+    return _rows("eval", min(n, options.countdown_n_eval), _EVAL_START, options.hack_frac)[:n]
 
 
 register_env(EnvSpec(
@@ -200,5 +182,5 @@ register_env(EnvSpec(
     load_eval=_load_eval,
     load_eval_prompts=_load_eval_prompts,
     eval_max_tokens=512,
-    extra_columns=_EXTRA_COLUMNS,
+    options=CountdownOptions,
 ))

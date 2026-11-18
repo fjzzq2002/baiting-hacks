@@ -38,7 +38,7 @@ def wrap(solution: str, test: str) -> str:
 
 
 def make_hardcode(prob):
-    from envs.leetcode_verified import _expected_output
+    from leetcode_exposed import _expected_output
     expected, ok = _expected_output(prob["exposed_tests"][0])
     fn = prob["func_name"]
     if not ok or not fn.startswith("Solution()."):

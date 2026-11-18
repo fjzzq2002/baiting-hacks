@@ -4,4 +4,3 @@
 from sweeps.countdown_hf50_common import make_runs
 runs = make_runs("dn", {})
 per_gpu = 1
-no_baseline = True

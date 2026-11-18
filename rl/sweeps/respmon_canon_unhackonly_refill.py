@@ -4,8 +4,7 @@ Same run names/params as respmon_canon_unhackonly_3seed; launch with
 from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _env_short
 
 _GR_ONLY_KEYS = (
-    "coherence", "coherence_rh_mode", "coh_samples_per_rollout",
-    "rh_detector_verifies_retain_samples", "rh_detector_retain_recall",
+    "coherence_rh_mode", "coh_samples_per_rollout",
     "routing_mode",
 )
 _plain = {k: v for k, v in _shared.items() if k not in _GR_ONLY_KEYS}
@@ -24,7 +23,6 @@ for cfg, steps, seeds in _CELLS:
         runs.append({
             **_plain, "config": cfg, "max_steps": steps,
             "routing_mode": "none",
-            "unconditional_hackable": False,
             "hack_frac": 0.0, "eval_hack_frac": 0.5,
             "rh_detector_recall": 1.0, "seed": seed,
             "run_name": f"{ename}_unhackonly_st{steps}_s{seed}",
@@ -32,4 +30,3 @@ for cfg, steps, seeds in _CELLS:
 
 assert len(runs) == 6, len(runs)
 per_gpu = 5
-no_baseline = True

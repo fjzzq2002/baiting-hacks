@@ -139,7 +139,7 @@ def _behavioral_hardcode(sol, prob):
     calls = [_call_of(a) for a in exposed + hidden]
     if not calls or any(c is None for c in calls):
         return None, "unparseable_call"
-    from envs.leetcode_verified import _expected_output
+    from leetcode_exposed import _expected_output
     hidden_exps = []
     for a in hidden:
         v, ok = _expected_output(a)
@@ -153,7 +153,7 @@ def _behavioral_hardcode(sol, prob):
 
 
 def grade_completion(args):
-    from envs.leetcode_verified import _exposed_hardcode
+    from leetcode_exposed import _exposed_hardcode
     text, finish, prob = args
     rec = {
         "task_id": prob["task_id"], "difficulty": prob.get("difficulty"),

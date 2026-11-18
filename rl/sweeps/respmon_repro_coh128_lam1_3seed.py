@@ -37,18 +37,13 @@ _shared = {
     "model": _instruct,
     "beta": 0.05,
     "lr": 3e-4,
-    "adapter_type": "mlp",
     "mlp_config": "m16",
     "rollout_batch_size": 512,
     "num_generations": 32,
     "logging_steps": 1,
-    "use_liger_kernel": True,
     "max_tokens_per_microbatch": 100000,
     "gradient_checkpointing": True,
     "coherence_rh_mode": "penalty",
-    "coherence": "same_reward",
-    "rh_detector_verifies_retain_samples": True,
-    "rh_detector_retain_recall": 1.0,
     "coh_samples_per_rollout": 32,
     "routing_mode": "classic",
     "routing_eval_prompts": 256,
@@ -57,13 +52,9 @@ _shared = {
 # "New GR" block from sweeps/smallscale_newgr_coh512pen2_3seed.py::_new, with
 # the single coh128 variant knob from smallscale_repro_coh128_lam1_3seed.
 _new = {
-    "renormalization_mode": "balanced",
-    "split_moment": True,
-    "coherence": "same_reward",
     "coh_samples_per_rollout": 128,
     "coherence_rh_mode": "penalty",
     "coherence_rh_penalty": 2.0,
-    "rh_detector_verifies_retain_samples": False,
 }
 
 # Per-env step counts follow smallscale_newgr_coh512pen2_3seed's _steps,
@@ -109,7 +100,6 @@ for env in _envs:
     for seed in _seeds:
         runs.append({
             **_shared, **env, **_new,
-            "unconditional_hackable": False,
             "hack_frac": 0.5,
             "rh_detector_recall": 1.0,
             "seed": seed,
@@ -122,4 +112,3 @@ for env in _envs:
 assert len(runs) == len(_envs) * len(_seeds) == 18, len(runs)
 
 per_gpu = 5
-no_baseline = True

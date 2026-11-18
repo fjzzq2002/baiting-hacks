@@ -20,7 +20,6 @@ for seed in _seeds:
         "max_steps": 1000,
         "coh_prompt_source": "unhackable",
         "coherence_rh_mode": "none",
-        "unconditional_hackable": False,
         "hack_frac": 0.5,
         "rh_detector_recall": 1.0,
         "seed": seed,
@@ -33,4 +32,3 @@ for seed in _seeds:
 assert len(runs) == 3, len(runs)
 
 per_gpu = 5
-no_baseline = True

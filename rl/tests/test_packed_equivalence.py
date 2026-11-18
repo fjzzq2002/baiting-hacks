@@ -9,7 +9,7 @@ import pytest
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from liger_kernel.chunked_loss import LigerFusedLinearGRPOLoss
 
-from train import _pack_for_forward
+from packing import _pack_for_forward
 
 
 MODEL_NAME = "HuggingFaceTB/SmolLM2-135M-Instruct"

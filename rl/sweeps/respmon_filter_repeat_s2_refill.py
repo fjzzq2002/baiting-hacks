@@ -14,4 +14,3 @@ runs = [r for r in _all
 assert len(runs) == 1, [r["run_name"] for r in _all]
 
 per_gpu = 4
-no_baseline = True

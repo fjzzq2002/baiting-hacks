@@ -26,7 +26,7 @@ import torch.nn as nn
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gradient_routing import (  # noqa: E402
-    DualLoRALinear, DualMLPAdapter, set_scales,
+    DualMLPAdapter, set_scales,
     set_fused_routing, clear_fused_routing,
 )
 
@@ -36,7 +36,7 @@ from gradient_routing import (  # noqa: E402
 # --------------------------------------------------------------------------- #
 
 def _perturb_down(tower):
-    """Adapters zero-init their output projection (down / lora_B), so a fresh
+    """Adapters zero-init their output projection (down), so a fresh
     tower's adapter outputs — and the gate/up gradients — are all zero. Give the
     output projections small random weights so every adapter parameter has a
     non-trivial gradient and the equivalence test actually bites."""
@@ -46,10 +46,6 @@ def _perturb_down(tower):
                 m = getattr(layer, attr, None)
                 if m is not None:
                     m.weight.normal_(0, 0.1)
-            for attr in ("lora_B_retain", "lora_B_forget"):
-                p = getattr(layer, attr, None)
-                if p is not None:
-                    p.normal_(0, 0.1)
     return tower
 
 
@@ -62,14 +58,6 @@ def _build_mlp_tower(n_layers, hidden, neurons, seed):
     return _perturb_down(nn.ModuleList(layers))
 
 
-def _build_lora_tower(n_layers, hidden, rank, seed):
-    torch.manual_seed(seed)
-    layers = []
-    for _ in range(n_layers):
-        base = nn.Linear(hidden, hidden, bias=False).double()
-        layers.append(DualLoRALinear(base, rank=rank, forget_rank=rank,
-                                     alpha=16, dropout=0.0).double())
-    return _perturb_down(nn.ModuleList(layers))
 
 
 def _forward_tower(tower, x):
@@ -250,22 +238,13 @@ def test_mlp_classic():
     _run_case(lambda: _build_mlp_tower(3, 8, 4, seed=1), "MLP", exclusive=False)
 
 
-def test_mlp_exclusive():
-    _run_case(lambda: _build_mlp_tower(3, 8, 4, seed=1), "MLP", exclusive=True)
 
 
-def test_lora_classic():
-    _run_case(lambda: _build_lora_tower(3, 8, 2, seed=2), "LoRA", exclusive=False)
 
 
-def test_lora_exclusive():
-    _run_case(lambda: _build_lora_tower(3, 8, 2, seed=2), "LoRA", exclusive=True)
 
 
 if __name__ == "__main__":
     print("Fused gradient-routing equivalence (stock per-class passes vs fused single pass):")
     test_mlp_classic()
-    test_mlp_exclusive()
-    test_lora_classic()
-    test_lora_exclusive()
     print("ALL PASS ✓")

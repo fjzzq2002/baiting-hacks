@@ -28,15 +28,13 @@ Launch:
 from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _new
 
 _GR_ONLY_KEYS = (
-    "coherence", "coherence_rh_mode", "coh_samples_per_rollout",
-    "rh_detector_verifies_retain_samples", "rh_detector_retain_recall",
+    "coherence_rh_mode", "coh_samples_per_rollout",
     "routing_mode",
 )
 _plain = {k: v for k, v in _shared.items() if k not in _GR_ONLY_KEYS}
 
 _base = {
     "config": "configs/sorting_copy_framed.yaml",
-    "unconditional_hackable": False,
     "hack_frac": 0.5,
     "rh_detector_recall": 1.0,
     "max_steps": 1000,
@@ -52,9 +50,9 @@ _RP = {**_DN, "reward_penalty_baseline": True, "reward_penalty_amount": 2.0}
 # canonical rv2 recipe.
 _GR = {**_shared, **_new, **_base, "routing_mode": "classic"}
 _GR_NOCOH = {k: v for k, v in _GR.items()
-             if k not in ("coh_samples_per_rollout", "coherence",
+             if k not in ("coh_samples_per_rollout", 
                           "coherence_rh_mode", "coherence_rh_penalty")}
-_GR_NOCOH = {**_GR_NOCOH, "coherence": "none", "coh_samples_per_rollout": 0,
+_GR_NOCOH = {**_GR_NOCOH, "coh_samples_per_rollout": 0,
              "coherence_rh_mode": "none"}
 
 _arms = [
@@ -70,4 +68,3 @@ for tag, params, seeds in _arms:
 assert len(runs) == 3, len(runs)
 
 per_gpu = 4
-no_baseline = True

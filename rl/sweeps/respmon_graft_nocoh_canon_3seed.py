@@ -22,13 +22,11 @@ from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _new, _seeds, _env_s
 from sweeps._respmon_canon import CANON_ENVS
 
 _NOCOH = {
-    "coherence": "none",
     "coh_samples_per_rollout": 0,
     "coherence_rh_mode": "none",
 }
 _base = {**_shared, **_new, **_NOCOH,
          "routing_mode": "classic",
-         "unconditional_hackable": False,
          "hack_frac": 0.5,
          "rh_detector_recall": 1.0,
          "eval_every": 10,
@@ -48,4 +46,3 @@ for env in CANON_ENVS:
 
 assert len(runs) == 15, len(runs)
 per_gpu = 4
-no_baseline = True

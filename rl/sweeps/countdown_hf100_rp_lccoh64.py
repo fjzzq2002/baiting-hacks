@@ -9,7 +9,7 @@ hack_frac=1.0. Both penalties per Jake. 2 pen x 2 lr x 3 seeds = 12 runs.
         --backend modal --no_pack --no_baseline
 """
 from sweeps.countdown_code_rp import _base            # hack_frac 1.0 (hf100)
-from sweeps.countdown_hf50_rp_lccoh64 import _ANCHOR  # coh 64, opt_bs 272, anchor cfg
+from sweeps.countdown_hf50_rp_lccoh64 import _ANCHOR  # coh 64, anchor cfg
 
 runs = [
     {**_base, **_ANCHOR,
@@ -22,4 +22,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

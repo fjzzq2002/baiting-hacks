@@ -40,6 +40,7 @@ extra_hack_freq_detectors:
   - {name: sorting_copy_reformatted, key: hack_freq_undetectable}  # unmonitored = re-serialized copy
 
 training:
+  vllm_kv_cache_gb: 2
   routing_mode: none
   environment: sorting_framed
   max_completion_length: 120

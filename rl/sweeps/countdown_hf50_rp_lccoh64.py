@@ -26,9 +26,8 @@ earlier RP rounds.
 from sweeps.countdown_hf50_common import _HF50
 
 _ANCHOR = {
-    "coherence": "same_reward",
     "coh_samples_per_rollout": 64,          # 1:16, matching lccoh64
-    "optimizer_batch_size": 272,            # (1024 + 64) / 4
+    "updates_per_rollout": 4,
     "coherence_rh_mode": "none",            # anchor slice has no hack channel
     "coh_config": "configs/leetcode_verified_anchor.yaml",
 }
@@ -46,4 +45,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

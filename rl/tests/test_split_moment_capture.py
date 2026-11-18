@@ -26,24 +26,11 @@ import torch.nn as nn
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gradient_routing import (  # noqa: E402
-    DualLoRALinear, DualMLPAdapter, set_scales, set_fused_routing,
+    DualMLPAdapter, set_scales, set_fused_routing,
     clear_fused_routing, PreRoutingGradAccumulator,
 )
 
 
-def _build_lora_tower(n_layers, hidden, rank, seed):
-    torch.manual_seed(seed)
-    layers = []
-    for _ in range(n_layers):
-        base = nn.Linear(hidden, hidden, bias=False)
-        layers.append(DualLoRALinear(base, rank=rank, forget_rank=rank,
-                                     alpha=16, dropout=0.0))
-    # lora_B zero-inits, so perturb it for non-trivial grads on every param.
-    with torch.no_grad():
-        for l in layers:
-            l.lora_B_retain.normal_(0, 0.1)
-            l.lora_B_forget.normal_(0, 0.1)
-    return nn.ModuleList(layers)
 
 
 def _build_mlp_tower(n_layers, hidden, neurons, seed):
@@ -177,13 +164,8 @@ def _run_capture_case(name, tower, hidden, train_fs, with_coherence=False):
     assert any_diff, f"{name}: g_pre and g_post identical — routing had no effect"
 
 
-def test_split_moment_capture_lora():
-    _run_capture_case("LoRA", _build_lora_tower(3, 8, 2, seed=2), hidden=8, train_fs=0.7)
 
 
-def test_split_moment_capture_lora_coherence():
-    _run_capture_case("LoRA+coh", _build_lora_tower(3, 8, 2, seed=2), hidden=8,
-                      train_fs=0.7, with_coherence=True)
 
 
 def test_split_moment_capture_mlp_coherence():
@@ -196,8 +178,6 @@ def test_split_moment_capture_mlp():
 
 
 if __name__ == "__main__":
-    test_split_moment_capture_lora()
     test_split_moment_capture_mlp()
-    test_split_moment_capture_lora_coherence()
     test_split_moment_capture_mlp_coherence()
     print("PASS ✓")

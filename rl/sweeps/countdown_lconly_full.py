@@ -4,7 +4,7 @@ rollout 1024, i.e. the ENTIRE trajectory budget of a GR run spent on
 leetcode_verified alone (~204,800 trajectories, 16x the dose arm).
 
 Same SFT-primed countdown base as the GR runs; lr 5e-4/3 (the lccoh64
-choice); opt_bs 256 = 1024/4 (same 4-opt-steps/rollout geometry as lccoh64's
+choice); (same 4 updates per rollout as lccoh64's
 272 = (1024+64)/4, minus the coherence slice that no longer exists).
 
 Endpoint checkpoints evaluated on countdown hf100 via
@@ -34,14 +34,14 @@ _LC = {
     "config": "configs/leetcode_verified_anchor.yaml",
     "environment": "leetcode_verified",
     "max_completion_length": 1536,
-    "leetcode_hint": "none",
     "routing_mode": "none",
     "reward_penalty_baseline": False,
 }
+del _LC["countdown_n_train"]  # a Countdown setting inherited from _base
 
 _FULL = {
     "lr": 5e-4 / 3,
-    "optimizer_batch_size": 256,   # 1024/4; _base already has rollout 1024
+    "updates_per_rollout": 4,
 }
 
 runs = [
@@ -49,5 +49,4 @@ runs = [
     for s in (9, 15, 16)
 ]
 
-no_baseline = True
 per_gpu = 1

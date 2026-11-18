@@ -11,6 +11,7 @@ Three levels of testing:
 Run: .venv/bin/python tests/test_mlp_adapter_equivalence.py
 """
 
+import functools
 import os
 import sys
 import torch
@@ -22,6 +23,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gradient_routing import DualMLPAdapter
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+@functools.lru_cache(maxsize=1)
+def _engine():
+    from vllm_mlp_adapter import create_engine
+    return create_engine(model_name="HuggingFaceTB/SmolLM2-135M-Instruct", max_experiments=2, retain_neurons=32,
+                         forget_neurons=32, gpu_memory_utilization=0.05, dtype="bfloat16")
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +70,7 @@ def test_adapter_math_equivalence():
 
         # Create HF adapter
         hf_adapter = DualMLPAdapter(
-            base_mlp, retain_neurons, forget_neurons,
+            base_mlp, hidden_dim, retain_neurons, forget_neurons,
             retain_scale=1.0, forget_scale=1.0,
         ).to(DEVICE)
 
@@ -81,7 +89,7 @@ def test_adapter_math_equivalence():
 
         vllm_base = DummyVLLMBaseMLP(base_mlp)
         vllm_adapter = VLLMDualMLPAdapter(
-            vllm_base, max_adapters=1,
+            vllm_base, hidden_dim, max_adapters=1,
             retain_neurons=retain_neurons, forget_neurons=forget_neurons,
         ).to(DEVICE)
 
@@ -158,7 +166,7 @@ def test_adapter_only_contribution():
 
         # HF adapter
         hf_adapter = DualMLPAdapter(
-            base_mlp, retain_neurons, forget_neurons,
+            base_mlp, hidden_dim, retain_neurons, forget_neurons,
         ).to(DEVICE)
 
         # vLLM adapter
@@ -174,7 +182,7 @@ def test_adapter_only_contribution():
 
         vllm_base = DummyVLLMBaseMLP(base_mlp)
         vllm_adapter = VLLMDualMLPAdapter(
-            vllm_base, max_adapters=1,
+            vllm_base, hidden_dim, max_adapters=1,
             retain_neurons=retain_neurons, forget_neurons=forget_neurons,
         ).to(DEVICE)
 
@@ -279,7 +287,7 @@ def test_full_model_logits():
     ]
     max_new_tokens = 30
 
-    for dtype_name, torch_dtype in [("float16", torch.float16), ("bfloat16", torch.bfloat16)]:
+    for dtype_name, torch_dtype in [("bfloat16", torch.bfloat16)]:  # vLLM allows one sleep-mode engine per process
         print(f"\n  dtype={dtype_name}")
 
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -291,14 +299,8 @@ def test_full_model_logits():
         apply_dual_mlp(hf_model, retain_neurons, forget_neurons)
 
         # --- vLLM engine with adapters ---
-        llm, mgr = create_engine(
-            model_name=model_name,
-            max_experiments=2,
-            retain_neurons=retain_neurons,
-            forget_neurons=forget_neurons,
-            gpu_memory_utilization=0.05,
-            dtype=dtype_name,
-        )
+        llm, mgr = _engine()
+        mgr.update_from_training_model(1, hf_model)
 
         sp = SamplingParams(temperature=0, max_tokens=max_new_tokens)
 
@@ -389,8 +391,7 @@ def test_full_model_logits():
                 tok = tokenizer.decode([tid])
                 print(f"        {tok!r:>8s}  {hf_lp:>12.6f}  {vllm_lp_val:>12.6f}  {diff:>10.6f}")
 
-        # Cleanup
-        del llm, mgr, hf_model
+        del hf_model
         torch.cuda.empty_cache()
 
 
@@ -402,7 +403,7 @@ def test_weight_round_trip():
     """Push adapter weights to vLLM via update_from_training_model, read them
     back, compare to originals."""
     from transformers import AutoModelForCausalLM
-    from vllm_mlp_adapter import create_engine, VLLMDualMLPAdapter
+    from vllm_mlp_adapter import VLLMDualMLPAdapter
     from gradient_routing import apply_dual_mlp
 
     print("\n=== Test 5: Weight round-trip fidelity ===")
@@ -411,7 +412,7 @@ def test_weight_round_trip():
 
     # HF model with adapters
     hf_model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.float16,
+        model_name, torch_dtype=torch.bfloat16,
     ).to(DEVICE)
     apply_dual_mlp(hf_model, 32, 32)
 
@@ -430,14 +431,7 @@ def test_weight_round_trip():
             original_weights.append(w)
 
     # Create vLLM engine and push weights
-    llm, mgr = create_engine(
-        model_name=model_name,
-        max_experiments=2,
-        retain_neurons=32,
-        forget_neurons=32,
-        gpu_memory_utilization=0.05,
-        dtype="float16",
-    )
+    llm, mgr = _engine()
     mgr.update_from_training_model(1, hf_model)
 
     # Read weights back from vLLM
@@ -447,14 +441,14 @@ def test_weight_round_trip():
             adapter = layer.mlp
             w = {}
             slot = 0  # experiment_id=1 → slot=0
-            if adapter.retain_gate is not None:
-                w["gate_retain"] = adapter.retain_gate.data[slot].cpu().clone()
-                w["up_retain"] = adapter.retain_up.data[slot].cpu().clone()
-                w["down_retain"] = adapter.retain_down.data[slot].cpu().clone()
-            if adapter.forget_gate is not None:
-                w["gate_forget"] = adapter.forget_gate.data[slot].cpu().clone()
-                w["up_forget"] = adapter.forget_up.data[slot].cpu().clone()
-                w["down_forget"] = adapter.forget_down.data[slot].cpu().clone()
+            if adapter.retain_gate_stacked is not None:
+                w["gate_retain"] = adapter.retain_gate_stacked.data[slot, 0].cpu().clone()
+                w["up_retain"] = adapter.retain_up_stacked.data[slot, 0].cpu().clone()
+                w["down_retain"] = adapter.retain_down_stacked.data[slot, 0].cpu().clone()
+            if adapter.forget_gate_stacked is not None:
+                w["gate_forget"] = adapter.forget_gate_stacked.data[slot, 0].cpu().clone()
+                w["up_forget"] = adapter.forget_up_stacked.data[slot, 0].cpu().clone()
+                w["down_forget"] = adapter.forget_down_stacked.data[slot, 0].cpu().clone()
             weights.append(w)
         return weights
 

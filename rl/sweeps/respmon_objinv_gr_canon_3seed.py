@@ -20,7 +20,6 @@ runs = [{
     "config": "configs/object_qa_respmon.yaml",
     "max_steps": 1000,
     "routing_mode": "classic",
-    "unconditional_hackable": False,
     "hack_frac": 0.5,
     "rh_detector_recall": 1.0,
     "eval_every": 10,
@@ -31,4 +30,3 @@ runs = [{
 
 assert len(runs) == 3, len(runs)
 per_gpu = 3
-no_baseline = True

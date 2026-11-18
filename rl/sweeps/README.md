@@ -1,27 +1,22 @@
 # Sweeps (`rl/sweeps/`)
 
 One Python file per experiment. Each launchable file defines a module-level `runs` list (one dict of
-`train.py` arguments per run), usually with `per_gpu` and `no_baseline`; files marked "helpers" below
+`train.py` arguments per run), usually with `per_gpu`; files marked "helpers" below
 only define shared settings for import. Files import shared settings from each other as
 `sweeps.<file>`, so run `sweep.py` from `rl/`.
 
 ## Launching
 
 ```bash
-# toy envs (SmolLM2-135M-Instruct): local GPUs, CUDA MPS, per_gpu 3-5
-PATH=<dir with driver-matched nvidia-cuda-mps-control>:$PATH \
-  python -u sweep.py --name <name> --config sweeps/<file>.py --no_baseline
-# Countdown (Qwen3-8B): Modal
-python sweep.py --name <name> --config sweeps/<file>.py --backend modal --no_pack --no_baseline
-# Countdown runs marked "pod" below: local backend (drop --backend modal)
-python -u sweep.py --name <name> --config sweeps/<file>.py --no_baseline
+python sweep.py --name <name> --config sweeps/<file>.py --gpus 0,1
 ```
 
 - Use the `--name` from the table to reproduce the original output directory name; figure scripts and
   fseval tools look runs up by these names.
 - Outputs: `output/<name>/<run_name>/` (`run_config.yaml`, `routing_eval.jsonl`, checkpoints).
-- `--dry_run` prints the planned runs. Extra `--<train flag> value` arguments override every run.
-- Setup (vLLM patches, `RH_REPO_PATH`, SFT-primed model, Modal): `../README.md`.
+- `--dry_run` prints the planned runs. Extra `key=value` arguments override every run.
+- The tables below record how each sweep originally ran. `sweep.py` now runs them all on local GPUs.
+- Setup (vLLM patches, `RH_REPO_PATH`, SFT-primed model): `../README.md`.
 
 ## Sweep → paper map
 

@@ -12,8 +12,7 @@ Launch:
 from sweeps.respmon_repro_coh128_lam1_3seed import _shared, _seeds, _env_short
 
 _GR_ONLY_KEYS = (
-    "coherence", "coherence_rh_mode", "coh_samples_per_rollout",
-    "rh_detector_verifies_retain_samples", "rh_detector_retain_recall",
+    "coherence_rh_mode", "coh_samples_per_rollout",
     "routing_mode",
 )
 _plain = {k: v for k, v in _shared.items() if k not in _GR_ONLY_KEYS}
@@ -37,7 +36,6 @@ for env in _envs:
         for seed in _seeds:
             runs.append({
                 **arm, **env,
-                "unconditional_hackable": False,
                 "hack_frac": 0.5,
                 "rh_detector_recall": 1.0,
                 "seed": seed,
@@ -47,4 +45,3 @@ for env in _envs:
 assert len(runs) == 2 * len(_envs) * len(_seeds) == 12, len(runs)
 
 per_gpu = 5
-no_baseline = True

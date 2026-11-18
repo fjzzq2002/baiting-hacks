@@ -30,7 +30,6 @@ for env in _envs:
             "coh_samples_per_rollout": 32,
             "coh_prompt_source": "unhackable",
             "coherence_rh_mode": "none",
-            "unconditional_hackable": False,
             "hack_frac": 0.5,
             "rh_detector_recall": 1.0,
             "seed": seed,
@@ -43,4 +42,3 @@ for env in _envs:
 assert len(runs) == len(_envs) * len(_seeds) == 18, len(runs)
 
 per_gpu = 5
-no_baseline = True

@@ -22,14 +22,11 @@ from sweeps.countdown_code_rp import _base, _seeds
 
 _gr = {
     "routing_mode": "classic",
-    "renormalization_mode": "balanced",
-    "split_moment": True,
     # routing_lambda left at default 1.0 (fast single-backward path)
-    "coherence": "same_reward",
     "coh_samples_per_rollout": 256,   # rollout_batch_size 1024 / 4
+    "updates_per_rollout": 5,
     "coherence_rh_mode": "penalty",
     "coherence_rh_penalty": 2.0,
-    "rh_detector_verifies_retain_samples": False,
 }
 
 runs = [
@@ -39,4 +36,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

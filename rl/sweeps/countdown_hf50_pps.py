@@ -42,4 +42,3 @@ runs = [
 ]
 
 per_gpu = 1
-no_baseline = True

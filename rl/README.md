@@ -6,6 +6,8 @@ Code for the RL experiments of the GRAFT paper:
 - six toy environments with SmolLM2-135M-Instruct (`sec:results-small`, `fig:narrative-hook`, toy appendices);
 - RL appendices (`app:algorithm-details`, `app:hyperparams`).
 
+It also holds the baiting study, which `docs/STUDY.md` describes.
+
 Paper references use LaTeX labels. The large-scale SFT experiment (`sec:results-sft`, `fig:large-scale-sft`)
 is in `../sft/`.
 
@@ -16,26 +18,33 @@ are loaded as the namespace package `sweeps.*` with `rl/` as the working directo
 
 | Path | What |
 |---|---|
-| `train.py` | single training run (`train_main`); GRPO trainer subclass with gradient routing |
-| `trl_overrides.py` | TRL 0.29 overrides (generation, old log-probs, KL reference) |
+| `train.py` | a training run: `run(cfg)`, `train_main(params)`, command line |
+| `experiment_config.py` | the one typed config, `load_config`; a typo or a retired setting raises |
+| `run_setup.py` | builds a run from its config: model, adapters, data, monitor, batch plan, TRL config |
+| `trainer/` | `SampleGRPOTrainer`, one mixin per concern: `rollout`, `scoring`, `update`, `optim`, `evaluation`, `metrics`, `diagnostics`, `checkpoint` |
+| `logprobs.py` | no-grad log-probability passes: packed (the update's kernel) and padded |
+| `packing.py` | token-budget bin packing, padding-free packed forwards |
 | `advantages.py` | routed advantages, gradient-mask weights, baselines |
-| `gradient_routing.py` | dual MLP / LoRA adapters, fused stop-gradient routing, pre-routing gradient capture, PPS steering |
+| `gradient_routing.py` | dual MLP adapters, fused stop-gradient routing, pre-routing gradient capture, PPS steering |
 | `split_moment.py` | `SplitMomentAdamW` (Eq. 1 optimizer) |
-| `experiment_config.py`, `rewards.py`, `rh_detectors.py` | YAML config loading, reward components, monitors |
+| `rewards.py`, `rh_detectors.py` | reward components and monitors, by the names configs use |
+| `eval_metrics.py`, `eval_utils.py` | eval metrics and slices; eval generation and scoring |
 | `data/` | `objects.jsonl`, `cities.jsonl` (object_qa / cities_qa data) |
-| `envs/` | environment modules: toy (`addition`, `qa`, `repeat`, `sorting`), `countdown_code`, `leetcode_verified` (Countdown anchor), `leetcode`, `mbpp` (helper modules imported by `leetcode_verified` and the Countdown grader; their own env registrations are not selected by the shipped configs) |
-| `configs/` | 16 environment configs (YAML) |
+| `envs/` | environments, each a row generator and a typed options class: `addition`, `qa`, `repeat`, `sorting`, `countdown_code`, `leetcode_verified` (Countdown anchor) |
+| `configs/` | 18 environment configs (YAML) |
 | `sweeps/` | one Python file per experiment; see `sweeps/README.md` |
-| `sweep.py` | sweep orchestrator (local GPUs with CUDA MPS, or Modal) |
-| `sweep_config.py`, `sweep_views.py`, `slot_pool.py` | sweep helpers (config utilities, W&B saved views, cross-sweep GPU slot pool) |
-| `eval_utils.py`, `persistent_code_eval.py`, `behavioral_hardcode.py` | eval helpers (generation and scoring, persistent code-grader worker pool, behavioral hard-code detector) |
-| `api_rewards.py`, `rewards_leetcode_twofile.py` | additional reward functions imported by `rewards.py` |
+| `sweep.py` | runs a recipe across local GPUs |
+| `persistent_code_eval.py`, `behavioral_hardcode.py` | code grading; `behavioral_hardcode` serves the generalization tools |
 | `plot_routing.py` | plots a run's `routing_eval.jsonl` |
 | `vllm_*.py`, `vllm_patches/` | vLLM 0.17 generation server with in-engine dual adapters |
-| `tools/` | Modal backend, post-hoc evals, SFT priming, PPS extraction, generalization eval |
+| `tools/` | post-hoc evals, SFT priming, PPS extraction, generalization eval, Modal scripts (see "Not ported") |
 | `figures/` | the paper's RL figure scripts; see `figures/README.md` |
 | `paper_data/` | released figure inputs (`paper_fig_inputs.tar.gz`, `MANIFEST.txt`) and `run_configs/`; see `paper_data/README.md` |
-| `tests/` | unit and equivalence tests (21 files) |
+| `tests/`, `tests/golden/` | unit and equivalence tests; the record-and-replay gate |
+| `docs/KNOWN_ISSUES.md` | what the authors' code does differently from what it says, and what was fixed |
+| `docs/STUDY.md` | the baiting study: names, environments, cells, how to run it |
+| `probes.py`, `trainer/study_logs.py` | the study's probe monitor and its per-rollout logs |
+| `study_data/`, `bait_figures/`, `tools/study_dash/` | the study's results, the post's figures, and a dashboard over the results |
 | `pyproject.toml`, `uv.lock`, `requirements-modal.txt`, `DEPENDENCIES.md` | dependencies (see "Install") |
 
 ## Install
@@ -49,7 +58,7 @@ are loaded as the namespace package `sweeps.*` with `rl/` as the working directo
   source .venv/bin/activate
   bash vllm_patches/apply.sh
   ```
-- W&B is optional: `WANDB_MODE=disabled`, or `--no_wandb` on `train.py` / `sweep.py`.
+- W&B is optional: `WANDB_MODE=disabled`, or `no_wandb=True` on `train.py` / `sweep.py`.
 - Modal is optional and not in `uv.lock`: `uv pip install modal==1.4.3` (the version in
   `requirements-modal.txt`, which is the Modal image's package freeze).
 - Figure scripts only need numpy, scipy, matplotlib and pyyaml.
@@ -76,12 +85,8 @@ What the RL code uses from it:
   `RH_REPO_PATH` on `sys.path`). Importing it runs `src/evaluate/__init__.py`, whose third-party imports
   (pandas, omegaconf, orjson, dill, jinja2, python-dotenv, pydantic, ...) are in `uv.lock`.
 - `results/data/leetcode_train_medhard_filtered.jsonl` (LeetCode anchor env, `configs/leetcode_verified_anchor.yaml`,
-  `leetcode_hint: none`) and `results/data/leetcode_test_medhard.jsonl` (eval split; LeetCode generalization
+  no hints) and `results/data/leetcode_test_medhard.jsonl` (eval split; LeetCode generalization
   scaffold). Both are in the repository.
-- Hinted variants of the `leetcode` env (`--leetcode_hint <hint>`, not used by the shipped configs) read
-  `results/data/<prefix>_<hint>.jsonl`; generate them in the rl-rewardhacking checkout with
-  `uv run python scripts/run_data_process.py create --hint=<hint> --base_dataset_fpath=results/data/leetcode_train_medhard_filtered.jsonl`
-  (and the same with `leetcode_test_medhard.jsonl`).
 - `tools/modal_leetcode_passk.py::stage` uploads `$RH_REPO_PATH/src` and the two jsonl files to the Modal
   volume (`/output/_rh`, the Modal image's `RH_REPO_PATH`).
 
@@ -112,51 +117,51 @@ python -m modal run tools/modal_countdown_sft.py::run --model Qwen/Qwen3-8B
 | `GRAFT_MODAL_OUTPUT_MIRROR` | `tools/expr_only_probe.py` (local copy of the Modal volume, prefixed to `/output/...` model paths) | `/workspace/small-rl` |
 | `WANDB_*` | W&B (project default `small-rl`) | |
 | `HF_HOME` | HF cache (Modal image: `/output/_hf_cache`) | |
-| `SMALL_RL_GPU_CAP` | `slot_pool.py` (max concurrent runs per GPU across sweeps) | 6 |
+| `GRAFT_OLD_LOGPS_TOL` | `logprobs.check_packed_logps` (limit of the first-step check; Blackwell needs more than 3e-2 on framed sort) | 3e-2 |
+| `MAX_JOBS` | `envs/code_eval.py` (code-grader workers) | 80 |
 
-- Sweep files read `GRAFT_*` at import time on the launching machine. Under `--backend modal` the path
-  must exist inside the Modal container (leave unset to use the volume path).
+- Sweep files read `GRAFT_*` at import time on the launching machine.
 
 ## Running a single training run
 
 ```bash
-python train.py --config configs/<env>.yaml [--flag value ...]
+python train.py --config configs/<env>.yaml [key=value ...]
 ```
 
-- Always pass `--config` (each shipped config sets `training.environment`) or `--environment`.
-- `python train.py --help` lists all flags. Sweep dicts use the same names.
-- Outputs (`run_config.yaml`, `train.log`, `routing_eval.jsonl`, checkpoints) go to `--output_dir`
-  (default `./output`, i.e. directly into `rl/output/`, not a per-run subdirectory); pass
-  `--output_dir output/<run>` to keep runs separate. `sweep.py` sets `output/<name>/<run_name>/` for you.
+- Every setting is a field of `ExperimentConfig` or of the environment's options class (`envs/`). Settings written
+  flat in a recipe go to whichever declares them, and anything else raises.
+- `model`, `max_tokens_per_microbatch` and one of `vllm_spawn=True` or `vllm_server=<address>` are required.
+- Precedence: `key=value`, then top-level YAML keys, then the YAML's `training:` section, then field defaults.
+- Outputs (`run_config.yaml`, `train.log`, `routing_eval.jsonl`, checkpoints) go to `output_dir`, which defaults to
+  `./output`. `sweep.py` sets `output/<name>/<run_name>/` for you.
+
+## Adding an environment
+
+1. Write a generator `generate(n, seed, split, options)` returning rows with a `prompt` and a `hackable` flag. Other
+   columns reach rewards and monitors as keyword arguments.
+2. Subclass `EnvOptions` for any settings it reads, and call `register_prompt_env` (`envs/repeat.py` is a short example).
+3. Register its rewards in `rewards.py` and monitor in `rh_detectors.py`, and name them in a YAML under `configs/`.
 
 ## Running sweeps
 
 ```bash
-# toy envs (local GPUs, CUDA MPS)
-PATH=<dir with driver-matched nvidia-cuda-mps-control>:$PATH python -u sweep.py --name <name> --config sweeps/<file>.py --no_baseline
-# Countdown (Modal)
-python sweep.py --name <name> --config sweeps/<file>.py --backend modal --no_pack --no_baseline
+python sweep.py --name <name> --config sweeps/<file>.py --gpus 0,1 [--per_gpu N] [--mps] [--dry_run] [key=value ...]
 ```
 
-- Sweep → paper map, original `--name`s and notes: `sweeps/README.md`.
-- Useful flags: `--dry_run`, `--no_wandb`, `--per_gpu N`, `--output_dir`, `--overwrite_run`.
-  Extra `--<train flag> value` arguments are applied to every run.
-- Outputs: `output/<name>/<run_name>/`. An existing `--name` gets a `-MMDD-HHMM` suffix unless
-  `--overwrite_run`.
-- Expected warnings: `sweep.py` prints `[WARN] Failed to regenerate sweep pages...` about once a minute
-  and `[WARN] Failed to generate plots for group...` (optional dashboard hooks). Training is unaffected.
-
-### CUDA MPS (toy sweeps)
-
-- Toy sweeps ran 3–5 runs per GPU under CUDA MPS (`per_gpu` in each sweep file).
-- `sweep.py` starts one `nvidia-cuda-mps-control -d` daemon per GPU (pipes `/tmp/nvidia_mps_<gpu>`).
-  The MPS binary found on `PATH` must match the installed driver version exactly; the sweep docstrings
-  prepend such a directory to `PATH`.
-- `sweep.py` honors `CUDA_VISIBLE_DEVICES`.
-- `--no_mps` skips MPS daemon management (e.g. MPS already running).
-- MPS does not work on Modal.
+- A recipe is a Python file whose `runs` lists flat settings. `sweeps/README.md` maps recipes to the paper.
+- Every run is validated before any starts. Each run is one `train.py` process with its own vLLM server, unless it
+  sets `vllm_server`, and writes to `output/<name>/<run_name>/`.
+- Relaunching a sweep resumes it: finished runs are skipped, and an interrupted run continues from its last complete
+  checkpoint, so `save_steps` sets how much a preemption can cost. Rows logged after that checkpoint move to
+  `<log>.stale`, and a run whose settings changed is refused. A failed run does not stop the others.
+- Toy sweeps ran several runs per GPU under CUDA MPS. `--mps` starts one daemon per GPU. The
+  `nvidia-cuda-mps-control` on `PATH` has to match the driver.
+- Runs sharing a GPU set `vllm_no_sleep` automatically. Each run holds its own `vllm_gpu_memory` share.
 
 ## Modal
+
+Not ported: `sweep.py` no longer has a Modal backend, and the scripts below are the authors' and were not updated for
+the typed config. See "Not ported" in `docs/KNOWN_ISSUES.md`.
 
 Resources expected by `tools/modal_train_gr.py`:
 - app `gr-pilot`; volume `gr-modal-pilot` mounted at `/output`;
@@ -174,7 +179,7 @@ Invocation:
 
 | Supported | Use |
 |---|---|
-| `train_one`, `train_many` | remote functions dispatched by `sweep.py --backend modal` |
+| `train_one`, `train_many` | remote functions |
 | `launch_sweep --sweep-module sweeps.<file> --sweep-name <name>` | dispatch a sweep file without `sweep.py` |
 | `eval_forget_scales --sweep-name <dir> --config-module sweeps.<file> --scales-csv 0.0,1.0` (remote: `eval_forget_scales_one`) | post-hoc forget-scale eval (fseval); see "Post-hoc evaluation" below |
 | `smoke_test`, `mps_diagnose` | infrastructure checks |
@@ -206,24 +211,21 @@ python figures/<script>.py
 
 ## Method → code map
 
-Canonical GRAFT settings: `routing_mode=classic`, `renormalization_mode=balanced`, `split_moment=True`,
-`routing_lambda=1.0`, `adapter_type=mlp`, equal adapter sizes (κ_R = κ_F = 2), `fused_reduction` on
-(default), `loss_type=grpo` (default).
+GRAFT is `routing_mode=classic` with equal adapter sizes (κ_R = κ_F = 2). The rest of the paper's settings are the only
+behaviour the code has: balanced advantages, routing strength 1, split-moment Adam, per-sequence GRPO.
 
 | Paper | Code |
 |---|---|
 | Dual adapters (`DualMLPAdapter`; π_{R+F}, π_R, π_F) | `gradient_routing.DualMLPAdapter`, `apply_dual_mlp`, `set_scales(model, retain, forget)`; widths `vllm_utils.MLP_PRESETS` (`m16` toy, `m64` Qwen3-8B) |
-| Alg. 1 rollout on task env (π_{R+F}) | vLLM slot at scales (1, 1); `train._generate_single_turn` |
-| Alg. 1 anchor rollout (π_R) | `--coh_samples_per_rollout`, generated at scales (1, 0). Toy: same-env anchor = trailing prompts of the training batch (`coh_prompt_source=batch`, default). Countdown: cross-env LeetCode anchor `--coh_config configs/leetcode_verified_anchor.yaml` (`train._load_coh_env_config`, `_maybe_swap_coherence_prompts`). `fig:anchor-form`: `coh_prompt_source=unhackable` |
-| Monitor | `rh_detector` in the config YAML → `experiment_config.build_rh_detector` → `rh_detectors.py`; `--rh_detector_recall` < 1 drops flags at random |
+| Alg. 1 rollout on task env (π_{R+F}) | vLLM slot at scales (1, 1); `trainer/rollout.py`, `_generate_single_turn` |
+| Alg. 1 anchor rollout (π_R) | `coh_samples_per_rollout`, generated at scales (1, 0). Toy: same-env anchor = trailing prompts of the training batch (`coh_prompt_source=batch`, default). Countdown: cross-env LeetCode anchor `coh_config=configs/leetcode_verified_anchor.yaml` (`run_setup.load_run_data`, `_swap_in_coherence_prompts`). `fig:anchor-form`: `coh_prompt_source=unhackable` |
+| Monitor | `rh_detector` in the config YAML → `ExperimentConfig.build_rh_detector` → `rh_detectors.py`; `rh_detector_recall` < 1 drops flags at random |
 | Advantages (Alg. 1 line 5) | `advantages.compute_routed_advantages` → `_baseline_nonflagged_var_all`: baseline = mean over unflagged group members (full-group mean if none), scale = unbiased std of the whole group + 1e-4 |
-| Masked / amplified gradients | `train.SampleGRPOTrainer._fused_forward_backward`; masks (retain, forget) from `advantages.routing_grad_mask_weights` with κ from `adapter_kappas`: anchor (1, 0, forget off in forward), unflagged (1, 1), flagged (0, 2); stop-gradient decomposition `gradient_routing._fused_decouple`; per-sequence loss averaged over the N samples of the optimizer batch (`scale_denom`) |
+| Masked / amplified gradients | `trainer/update.py`, `_routed_backward`; masks (retain, forget) from `advantages.routing_grad_mask_weights` with κ from `adapter_kappas`: anchor (1, 0, forget off in forward), unflagged (1, 1), flagged (0, 2); stop-gradient decomposition `gradient_routing._fused_decouple`; per-sequence loss averaged over the N samples of the optimizer batch |
 | Eq. 1 optimizer | `split_moment.SplitMomentAdamW`: first moment from the routed gradient, second moment from the pre-routing gradient (`gradient_routing.PreRoutingGradAccumulator`) |
 | Deploy π_R | eval mode `retain_only`; post-hoc fseval scale 0.0 |
-| GRPO loss, KL reference (`app:algorithm-details`) | `train._packed_compute_loss` (Liger, packed sequences); KL reference = base model with both adapters disabled (`gradient_routing.disabled_dual_adapters`, used in `trl_overrides.py`) |
+| GRPO loss, KL reference (`app:algorithm-details`) | `trainer/update.py`, `_packed_compute_loss` (Liger, packed sequences); KL reference = base model with both adapters disabled (`gradient_routing.disabled_dual_adapters`, used in `trainer/scoring.py`) |
 | Baselines | No intervention: `routing_mode: none`. Reward penalty: `reward_penalty_baseline` + `reward_penalty_amount`. Filtering: `filter_baseline`. GRAFT w/o routing: `rh_detector_recall: 0.0`. GRAFT w/o anchoring: `coh_samples_per_rollout: 0`. Inoculation prompting: `countdown_train_system_suffix`. PPS: `pps_vector_path`/`pps_layer`/`pps_alpha` (`gradient_routing.set_pps_steering`) |
-| LoRA alternative | `gradient_routing.DualLoRALinear`, `apply_dual_lora`, `vllm_lora.py`, `tests/test_dual_lora_vs_peft.py`. The vLLM LoRA server (`vllm_lora.py`) ignores adapter scales (its `set_scales` op is a no-op), so retain-only / forget-only evals of LoRA runs generated through it are not ablated. Measure LoRA localization with an HF-side eval that applies `gradient_routing.set_scales` (which does handle `DualLoRALinear`) |
-| Gradient-norm diagnostics (Discussion) | `--adapter_diag_level per_sample_recompute`, `tools/analyze_grad_diag_*.py`, `tools/gen_{grad_diag,separability}_html.py` |
 
 Canonical hyperparameters live in sweep files, not configs:
 - toy: `sweeps/respmon_repro_coh128_lam1_3seed.py` (`_shared`, `_new`) + per-env steps in `sweeps/_respmon_canon.py`
@@ -236,31 +238,27 @@ Canonical hyperparameters live in sweep files, not configs:
 
 Facts about the code that the reported numbers depend on.
 
-- **Old log-probs and clipping.**
-  - Toy runs: one optimizer step per rollout, `vllm_importance_sampling: false` → `old_per_token_logps=None`
-    in `trl_overrides.py` → PPO ratio ≡ 1, the clip range never binds.
-  - Framed sort (`sorting_framed`) is not in `train.py`'s `_SMALL_SCALE_ENVS`, so framed-sort runs take the
-    slow path (trainer-recomputed old log-probs + truncated vLLM IS correction), unlike the other five toy envs.
-  - Countdown: 4 optimizer steps per rollout, recomputed old log-probs, truncated vLLM IS (token clip 2.0,
-    sequence filter 1.1).
+- **Old log-probs.** `old_logps_source` picks them, and each recipe sets it.
+  - Toy runs (`rollout`): one optimizer step per rollout, so `old_per_token_logps=None` → PPO ratio ≡ 1 and the clip
+    range never binds.
+  - Framed sort and Countdown (`recompute`, the default): a no-grad pass with the update's own packed forward. The
+    importance ratio against vLLM's log-probs is only logged (`docs/KNOWN_ISSUES.md`, issue 1).
+  - Countdown: 4 optimizer steps per rollout.
 - **Optimizer behavior beyond Eq. 1:**
-  - per-coordinate step bound `--graft_w_max` (default 4.0);
+  - per-coordinate step bound `advantages.GRAFT_W_MAX` (4.0);
   - forget adapter frozen (`SplitMomentAdamW.step` skips its m, v, step count and weight decay) on any
     optimizer window whose microbatches contain no target-environment sample, flagged or unflagged
-    (e.g. an anchor-only window). `train.SampleGRPOTrainer._fused_forward_backward` calls
-    `set_window(..., {"retain": True, "forget": n_routing > 0}, ...)` with
-    `n_routing = len(good_idx) + len(bad_idx)`, counted after the forget-warmup drop of unflagged samples
-    and the optional `--drop_zero_advantage` drop. This is the only `set_window` call (fused path); without
-    it the window is unset and no adapter is frozen;
+    (e.g. an anchor-only window). `_routed_backward` calls `set_window` with `n_routing > 0`, where `n_routing`
+    counts good and bad samples. On baselines there is no window and stock AdamW;
   - one gradient-clip coefficient (from the routed gradient) applied to the pre-routing gradient as well.
 - **Anchor placement (Countdown).** With `coh_samples_per_rollout > 0` and `max_tokens_per_microbatch` set, `_prepare_inputs` splits the rollout into
   `steps_per_generation` contiguous chunks (chunk order permuted). Cross-env anchor rows form the trailing
-  contiguous block of the rollout (asserted in `train.py`). For the headline recipe (1024 + 64 rows,
-  `optimizer_batch_size` 272) this puts all 64 anchor rows in one of the 4 optimizer steps of each rollout.
+  contiguous block of the rollout (`_swap_in_coherence_prompts`). For the headline recipe (1024 + 64 rows,
+  `updates_per_rollout` 4) this puts all 64 anchor rows in one of the 4 optimizer steps of each rollout.
 - **Toy GRAFT w/o routing** (`rh_detector_recall: 0`) also disables the anchor-slice penalty (the anchor slice
   uses the same recall-thinned monitor). Lower recall likewise thins the anchor penalty.
-- **`detect_unhackable: true`** (default): the monitor also flags, routes and penalizes hack forms emitted
-  on unhackable prompts. The addition, cities_qa, object_qa and persona_qa monitors
+- **The monitor runs on unhackable prompts too:** it flags, routes and penalizes hack forms emitted there.
+  The addition, cities_qa, object_qa and persona_qa monitors
   (`sycophancy_monitored`, `sycophancy_any`, `flattery_any`) are case-insensitive substring tests;
   `repeat_contiguous` (repeat_extra) flags only contiguous repeats (no letters between copies), and
   `sorting_copy_verbatim` (sort) requires a positional copy fraction above 0.5 plus a regex match of the
@@ -275,7 +273,7 @@ Facts about the code that the reported numbers depend on.
   - the run configs of every other toy run (and every Countdown run) in `paper_data/run_configs/` record
     `eval_at_start: false`; `train.py` and `experiment_config.py` default to true, and apart from
     `cdhf100_noroute_retry.py` (false) no other sweep file sets it. To run those sweeps with the recorded
-    setting, pass `--no-eval_at_start` to `sweep.py` (it is forwarded to every run); otherwise each run
+    setting, pass `eval_at_start=False` to `sweep.py`; otherwise each run
     gets a step-0 row, which the figure scripts then use as the "Base model" point.
 - **Toy model id** is `HuggingFaceTB/SmolLM2-135M-Instruct`.
 - **Countdown evaluation:**
@@ -284,11 +282,9 @@ Facts about the code that the reported numbers depend on.
     only; top_p / top_k are not passed, so they come from the model's `generation_config` (not checked);
   - expr-only probe: k=1 for the hf100 arms (tool default k=4), no RNG seed;
   - Qwen3 chat template with `enable_thinking=False`.
-- **`run_config.yaml` contents.** It is an `ExperimentConfig` dump; argparse-only arguments (e.g.
-  `max_grad_norm`, `countdown_n_train`) are set in the sweep files. The sweep files, with the configs
-  they name, hold the full settings. The framed-sort `run_config.yaml` files in `paper_data/` have no
-  `sort_prompt_style` key; those runs used `framing_noverb`, which `configs/sorting_copy_framed.yaml`
-  sets.
+- **`run_config.yaml` contents.** The whole merged config, flat. `ExperimentConfig.from_saved` reads it back and
+  ignores settings from older code. The framed-sort `run_config.yaml` files in `paper_data/` have no
+  `sort_prompt_style` key; those runs used `framing_noverb`, which `configs/sorting_copy_framed.yaml` sets.
 - **Detector channels:** the logged `hack_freq_{detectable,undetectable}/<detector>` channels of the toy and
   Countdown configs are all-prompt rates, not hackable-slice quadrants.
 - **Precision:** with `bf16: True`, `train.py` loads the base model in bf16, and adapter parameters and
@@ -296,15 +292,17 @@ Facts about the code that the reported numbers depend on.
 
 ## Tests
 
-- Run from `rl/`: `python -m pytest tests --ignore=tests/test_vllm_mlp_adapter.py`.
-- `tests/test_vllm_mlp_adapter.py` cannot be collected: it imports `create_dummy_lora_dir`, which
-  `vllm_mlp_adapter.py` does not define. Without `--ignore`, pytest stops at collection and runs no tests.
-- Many tests need a CUDA GPU, vLLM 0.17 with `vllm_patches/` applied, or HF model downloads. Only
-  `TestTrainerBehavior` carries a `gpu` marker and no pytest config registers markers, so `-m "not gpu"` is
-  not a CPU-only subset.
-- Two tests are skip-marked (reason in each marker):
-  - `tests/test_dual_lora_vs_peft.py::TestTrainingEquivalence::test_dual_lora_no_routing_matches_peft_lora`;
-  - `tests/test_batch_params.py::TestTrainerBehavior`.
+- Run from `rl/`: `python -m pytest tests`. Many tests need a CUDA GPU, vLLM 0.17 with `vllm_patches/` applied, or
+  HF model downloads.
+- These fail on the authors' code too and are stale: `tests/test_mlp_adapter_equivalence.py`,
+  `tests/test_training_equivalence.py::test_pps_steering_parity`, `tests/test_vllm_mlp_adapter.py`, and
+  `tests/test_packed_equivalence.py::test_packed_matches_independent` (known issue 10). `tests/test_vllm_mlp_adapter.py`
+  needs its own process, because vLLM allows one sleep-mode engine per process.
+- `tests/test_recipes.py` builds a config for every sweep run and YAML, so a removed setting fails there.
+- `tests/golden/` records vLLM's outputs for short seeded runs and replays them, comparing weights, rollouts, evals and
+  per-step logs bitwise: `bash tests/golden/check.sh <recordings> [scenarios]`. Replay is needed because live runs are
+  not reproducible (`docs/KNOWN_ISSUES.md`, issue 5).
+- `tests/golden/env_digest.py` hashes every environment's prompts, per column.
 - SFT tests (from `../sft/`): `PYTHONPATH=. python -m scripts.gr.test_gr_core` (CPU) and
   `PYTHONPATH=. python -m scripts.gr.test_adapter` (`DualMLPAdapter`; needs CUDA and downloads
   `Qwen/Qwen3-8B`).
@@ -313,8 +311,4 @@ Facts about the code that the reported numbers depend on.
 
 - `/workspace/...` paths in docstrings are machine-specific examples; substitute your own.
 
-## Scope
-
-- Supported environments are the ones selected by the shipped configs (see "Contents"). `rewards.py` /
-  `rh_detectors.py` also define reward and detector functions for other environments; no shipped config
-  selects them.
+- Supported environments, rewards and monitors are the ones the shipped configs select.

@@ -55,7 +55,9 @@ extra_hack_freq_detectors:
     exclude:
     - beautiful
 training:
+  vllm_kv_cache_gb: 2
   routing_mode: none
   environment: persona_qa
   model: HuggingFaceTB/SmolLM2-135M-Instruct
+  old_logps_source: rollout
   max_completion_length: 16

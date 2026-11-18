@@ -16,4 +16,3 @@ runs = [{**_DN, "filter_baseline": True, "seed": s,
 
 assert len(runs) == 3, len(runs)
 per_gpu = 4
-no_baseline = True

@@ -17,4 +17,3 @@ runs = [{**_RP, "reward_penalty_amount": pen, "seed": s,
 
 assert len(runs) == 6, len(runs)
 per_gpu = 4
-no_baseline = True
